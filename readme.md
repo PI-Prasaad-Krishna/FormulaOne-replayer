@@ -29,7 +29,7 @@ pip install fastf1 matplotlib pandas
 
 **Quick Start**
 
-1. Place or cache FastF1 session files under the `f1_cache/` folder (this repository already includes example cached sessions).
+1. Place or cache FastF1 session files under the `f1_cache/` folder (the code creates it for you if you dont have it).
 2. Run the replayer:
 
 ```bash
