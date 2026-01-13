@@ -1,10 +1,12 @@
-# F1 Race Replayer v2.0 (FastF1 + Matplotlib + CustomTkinter)
+# F1 Race Replayer v2.3 (FastF1 + Matplotlib + CustomTkinter)
 # -----------------------------------------------------------------------------
 # Features:
 # - MODERN GUI: Using CustomTkinter for a sleek Dark Mode look.
 # - SMOOTH ANIMATION: 0.2s data resolution.
-# - DYNAMIC LEADERBOARD: Updates in real-time without flickering.
+# - DYNAMIC LEADERBOARD: Updates in real-time, fixed logic, DNF markers.
 # - FULL RACE SUPPORT: Stitches laps for all 20 drivers.
+# - PAUSE/RESUME: Functional playback control.
+# - FIXED: Lap Counter & Race Finish Logic.
 # -----------------------------------------------------------------------------
 
 import matplotlib
@@ -19,7 +21,7 @@ import pandas as pd
 import numpy as np
 import os
 import sys
-import customtkinter as ctk
+import customtkinter as ctk # PIP INSTALL CUSTOMTKINTER
 import tkinter as tk
 from tkinter import messagebox
 
@@ -69,6 +71,10 @@ def process_telemetry(session):
     # High resolution for smoothness
     step_size = 0.2 
     
+    # We need a robust way to calculate distance for the leaderboard.
+    # We will use 'Distance' from telemetry if available. 
+    # If a driver DNFs, their distance will stop increasing.
+    
     for driver in drivers:
         try:
             laps = session.laps.pick_driver(driver)
@@ -87,13 +93,18 @@ def process_telemetry(session):
             # Use Distance column if valid, else 0
             d = tel['Distance'].to_numpy() if 'Distance' in tel.columns else np.zeros_like(x)
 
+            # Determine if driver DNF'd (finished fewer laps than winner)
+            # This is a rough check; actual DNF status is better, but this works for viz.
+            status = "Running"
+            
             telemetry_data[driver] = {
                 "Time": t_seconds,
                 "X": x,
                 "Y": y,
                 "Distance": d,
                 "Color": get_driver_color(driver),
-                "Team": laps.iloc[0]['Team'] if not laps.empty else "Unknown"
+                "Team": laps.iloc[0]['Team'] if not laps.empty else "Unknown",
+                "Status": status
             }
             
             if len(t_seconds) > 0:
@@ -106,6 +117,7 @@ def process_telemetry(session):
         return None, None, None, None
 
     # Normalize Start Time
+    # Find the global minimum time to treat as T=0
     start_time = min([d["Time"][0] for d in telemetry_data.values() if len(d["Time"]) > 0])
     max_race_time -= start_time
     
@@ -117,26 +129,49 @@ def process_telemetry(session):
     for driver, data in telemetry_data.items():
         shifted_time = data["Time"] - start_time
         
+        # Interpolate X, Y and Distance to common timeline
+        # IMPORTANT: For DNF drivers, we want them to stay at their last known position/distance.
+        # np.interp with right=... handles this.
+        
+        # Check if driver stopped early (DNF)
+        last_data_time = data["Time"][-1] - start_time
+        is_dnf = last_data_time < (max_race_time - 120) # If they stopped > 2 mins before end
+        
         interp_x = np.interp(common_time, shifted_time, data["X"], left=np.nan, right=data["X"][-1])
         interp_y = np.interp(common_time, shifted_time, data["Y"], left=np.nan, right=data["Y"][-1])
         interp_d = np.interp(common_time, shifted_time, data["Distance"], left=0, right=data["Distance"][-1])
         
+        status = "DNF" if is_dnf else "Running"
+
         final_data[driver] = {
             "X": interp_x,
             "Y": interp_y,
             "Distance": interp_d,
             "Color": data["Color"],
-            "Team": data["Team"]
+            "Team": data["Team"],
+            "Status": status,
+            "EndTime": last_data_time # Time when they stopped
         }
     
-    # Calculate Lap Data
+    # Calculate Lap Data - FIXED LOGIC
     try:
-        winner = drivers[0]
-        winner_laps = session.laps.pick_driver(winner)
-        lap_start_times = winner_laps['LapStartTime'].dt.total_seconds().to_numpy() - start_time
-        lap_numbers = winner_laps['LapNumber'].to_numpy()
+        # Find driver with the most laps
+        driver_lap_counts = session.laps.groupby('Driver')['LapNumber'].max()
+        reference_driver = driver_lap_counts.idxmax()
+        
+        ref_laps = session.laps.pick_driver(reference_driver)
+        
+        lap_start_times = ref_laps['LapStartTime'].dt.total_seconds().to_numpy() - start_time
+        lap_numbers = ref_laps['LapNumber'].to_numpy()
+        
         lap_start_times = np.nan_to_num(lap_start_times, nan=0.0)
-    except:
+        
+        sort_idx = np.argsort(lap_start_times)
+        lap_start_times = lap_start_times[sort_idx]
+        lap_numbers = lap_numbers[sort_idx]
+        
+    except Exception as e:
+        print(f"Lap counter error: {e}")
         lap_start_times = [0]
         lap_numbers = [1]
         
@@ -175,6 +210,12 @@ class RaceReplayerApp(ctk.CTk):
         self.speed_var = ctk.StringVar(value="20x")
         self.speed_combo = ctk.CTkComboBox(self.control_frame, values=["1x", "5x", "10x", "20x", "50x"], variable=self.speed_var, width=80, command=self.change_speed)
         self.speed_combo.pack(side="left", padx=5)
+        
+        # PAUSE BUTTON
+        self.is_paused = False
+        self.pause_btn = ctk.CTkButton(self.control_frame, text="PAUSE", command=self.toggle_pause, fg_color="#E10600", width=80, font=("Roboto", 12, "bold"))
+        self.pause_btn.pack(side="left", padx=5)
+        self.pause_btn.configure(state="disabled") # Disabled until loaded
         
         self.status_lbl = ctk.CTkLabel(self.control_frame, text="Ready", text_color="gray")
         self.status_lbl.pack(side="left", padx=20)
@@ -265,6 +306,8 @@ class RaceReplayerApp(ctk.CTk):
              
         self.setup_plot()
         self.start_animation()
+        self.pause_btn.configure(state="normal", text="PAUSE", fg_color="#E10600")
+        self.is_paused = False
         self.status_lbl.configure(text=f"Replaying: {year} {circuit}", text_color="#2CC985")
 
     def setup_plot(self):
@@ -303,8 +346,26 @@ class RaceReplayerApp(ctk.CTk):
         self.canvas.draw()
 
     def change_speed(self, choice):
-        if self.anim:
+        if self.anim and not self.is_paused:
             self.start_animation(start_frame=self.current_frame)
+
+    def toggle_pause(self):
+        if not self.anim: return
+        
+        # If race finished, disable pause button
+        if self.status_lbl.cget("text") == "Race Finished":
+             return
+
+        if self.is_paused:
+            # RESUME
+            self.anim.event_source.start()
+            self.pause_btn.configure(text="PAUSE", fg_color="#E10600")
+            self.is_paused = False
+        else:
+            # PAUSE
+            self.anim.event_source.stop()
+            self.pause_btn.configure(text="RESUME", fg_color="#2CC985")
+            self.is_paused = True
 
     def start_animation(self, start_frame=0):
         if self.anim:
@@ -314,7 +375,6 @@ class RaceReplayerApp(ctk.CTk):
         total_frames = len(self.common_time)
         speed_mult = int(self.speed_var.get().replace("x", ""))
         
-        # Calculate interval: 0.2s data step.
         base_interval = (0.2 * 1000) / speed_mult
         
         step_frames = 1
@@ -329,15 +389,25 @@ class RaceReplayerApp(ctk.CTk):
             if idx >= total_frames:
                 try: self.anim.event_source.stop()
                 except: pass
+                # Update status
+                self.status_lbl.configure(text="Race Finished", text_color="white")
+                self.pause_btn.configure(state="disabled", text="FINISHED", fg_color="gray")
                 return []
 
             # 1. Update Drivers & Leaderboard
             leaderboard_data = []
             
+            current_race_time = self.common_time[idx]
+
             for driver, dot in self.driver_dots.items():
                 d_data = self.telemetry_data[driver]
                 x, y, dist = d_data["X"][idx], d_data["Y"][idx], d_data["Distance"][idx]
+                status = d_data["Status"]
+                end_time = d_data.get("EndTime", 999999)
                 
+                # Check if DNF'd before current time
+                has_dnf = (status == "DNF" and current_race_time > end_time)
+
                 if np.isnan(x) or np.isnan(y):
                     dot.set_visible(False)
                     self.driver_labels[driver].set_visible(False)
@@ -346,34 +416,60 @@ class RaceReplayerApp(ctk.CTk):
                     self.driver_labels[driver].set_visible(True)
                     dot.set_data([x], [y])
                     self.driver_labels[driver].set_position((x + 200, y + 200))
-                    leaderboard_data.append((driver, dist))
+                    
+                    # Update label color for DNF
+                    if has_dnf:
+                        dot.set_color("gray")
+                        self.driver_labels[driver].set_color("gray")
+                        self.driver_labels[driver].set_text(f"{driver} (DNF)")
+                    
+                    leaderboard_data.append((driver, dist, has_dnf))
 
-            # 2. Update Lap Counter
-            current_race_time = self.common_time[idx]
+            # 2. Update Lap Counter - CORRECTED
             lap_idx = np.searchsorted(self.lap_start_times, current_race_time, side='right') - 1
-            if lap_idx >= 0 and lap_idx < len(self.lap_numbers):
-                self.lap_counter_text.set_text(f"LAP {self.lap_numbers[lap_idx]} / {self.lap_numbers[-1]}")
+            
+            if lap_idx >= 0:
+                if lap_idx < len(self.lap_numbers):
+                    current_lap_num = self.lap_numbers[lap_idx]
+                    total_laps = self.lap_numbers[-1]
+                    self.lap_counter_text.set_text(f"LAP {current_lap_num} / {total_laps}")
+                else:
+                    self.lap_counter_text.set_text("FINISH")
+            else:
+                self.lap_counter_text.set_text("GRID")
             
             # 3. Update Leaderboard (Every 5th frame to save CPU)
             if frame_idx % 5 == 0:
                 leaderboard_data.sort(key=lambda x: x[1], reverse=True) # Sort by Distance
-                leader_dist = leaderboard_data[0][1] if leaderboard_data else 0
+                
+                # Find the leader who is NOT DNF
+                active_leaders = [d for d in leaderboard_data if not d[2]]
+                leader_dist = active_leaders[0][1] if active_leaders else 0
                 
                 for i, (row_frame, pos_lbl, drv_lbl, gap_lbl) in enumerate(self.lb_rows):
                     if i < len(leaderboard_data):
                         row_frame.pack(fill="x", pady=2) # Ensure visible
-                        drv, dist = leaderboard_data[i]
+                        drv, dist, is_dnf = leaderboard_data[i]
                         
                         drv_lbl.configure(text=drv)
                         
-                        # Style: Highlight leader
-                        if i == 0:
-                            gap_lbl.configure(text="LEADER", text_color="#2CC985")
-                            drv_lbl.configure(text_color="#2CC985")
+                        if is_dnf:
+                             gap_lbl.configure(text="DNF", text_color="red")
+                             drv_lbl.configure(text_color="gray")
+                             pos_lbl.configure(text_color="gray")
                         else:
-                            gap = leader_dist - dist
-                            gap_lbl.configure(text=f"-{gap:.0f} m", text_color="white")
-                            drv_lbl.configure(text_color="white")
+                            # Style: Highlight leader
+                            if i == 0:
+                                gap_lbl.configure(text="LEADER", text_color="#2CC985")
+                                drv_lbl.configure(text_color="#2CC985")
+                                pos_lbl.configure(text_color="#2CC985")
+                            else:
+                                gap = leader_dist - dist
+                                # Only show gap if close enough, else it's Laps?
+                                # Simplified: show distance gap
+                                gap_lbl.configure(text=f"-{gap:.0f} m", text_color="white")
+                                drv_lbl.configure(text_color="white")
+                                pos_lbl.configure(text_color="white")
                     else:
                         row_frame.pack_forget() # Hide unused rows
             
