@@ -60,7 +60,7 @@ def load_race_data(year, circuit, session_type="R"):
     print(f"Loading {year} {circuit} [{session_type}] session data...")
     try:
         session = fastf1.get_session(year, circuit, session_type)
-        session.load(telemetry=True, laps=True, weather=False)
+        session.load(telemetry=True, laps=True, weather=True) # EXTENDED: Load Weather
         return session
     except Exception as e:
         print(f"Error loading session: {e}")
@@ -87,7 +87,7 @@ def process_telemetry(session):
     
     for driver in drivers:
         try:
-            laps = session.laps.pick_driver(driver)
+            laps = session.laps.pick_drivers(driver)
             if laps.empty: continue
             tel = laps.get_telemetry()
             if tel is None or tel.empty: continue
@@ -106,7 +106,7 @@ def process_telemetry(session):
 
     for driver in drivers:
         try:
-            laps = session.laps.pick_driver(driver)
+            laps = session.laps.pick_drivers(driver)
             try:
                 # Optimized approach: get full telemetry, assume continuous
                 tel = laps.get_telemetry()
@@ -218,13 +218,13 @@ def process_telemetry(session):
              ref_driver = drivers[0]
              for d in drivers:
                 try:
-                    n = session.laps.pick_driver(d)['LapNumber'].max()
+                    n = session.laps.pick_drivers(d)['LapNumber'].max()
                     if n > max_laps:
                         max_laps = n
                         ref_driver = d
                 except: pass
             
-        ref_laps = session.laps.pick_driver(ref_driver)
+        ref_laps = session.laps.pick_drivers(ref_driver)
         
         # LapStartTime relative to our global_start_time
         lap_start_times = ref_laps['LapStartTime'].dt.total_seconds().to_numpy() - global_start_time
@@ -260,7 +260,98 @@ def process_telemetry(session):
             
     except: pass
         
-    return final_data, common_time, lap_start_times, lap_numbers, race_start_offset
+
+    # 2. Pre-Calculate Best Sectors & Speed Trap History per Lap
+    # Structure: lap_sector_data[driver][lap_num] = {'S1': (time, color), 'S2':..., 'ST': speed}
+    lap_sector_data = {d: {} for d in drivers}
+    
+    # Global Bests
+    overall_best_s1 = float('inf')
+    overall_best_s2 = float('inf')
+    overall_best_s3 = float('inf')
+    overall_best_st = 0
+    
+    # Driver Bests
+    driver_best_s1 = {d: float('inf') for d in drivers}
+    driver_best_s2 = {d: float('inf') for d in drivers}
+    driver_best_s3 = {d: float('inf') for d in drivers}
+    driver_best_st = {d: 0 for d in drivers}
+    
+    # Iterate through all laps sorted by time to simulate progression
+    all_laps_sorted = session.laps.sort_values(by=['LapStartTime'])
+    
+    for idx, lap in all_laps_sorted.iterrows():
+        driver = lap['Driver']
+        lap_num = lap['LapNumber']
+        
+        # S1
+        s1 = lap['Sector1Time'].total_seconds() if pd.notna(lap['Sector1Time']) else None
+        s1_color = "gray"
+        if s1:
+            if s1 < overall_best_s1:
+                overall_best_s1 = s1
+                s1_color = "purple"
+            elif s1 < driver_best_s1[driver]:
+                driver_best_s1[driver] = s1
+                s1_color = "green"
+            else:
+                 pass # No improvement (yellow in TV, but we keep gray/white or existing best?)
+                 # Actually requirement says "Best ... times"
+                 # If we show the "Best So Far", we should persist the best value.
+        
+        # S2
+        s2 = lap['Sector2Time'].total_seconds() if pd.notna(lap['Sector2Time']) else None
+        s2_color = "gray"
+        if s2:
+            if s2 < overall_best_s2:
+                overall_best_s2 = s2
+                s2_color = "purple"
+            elif s2 < driver_best_s2[driver]:
+                driver_best_s2[driver] = s2
+                s2_color = "green"
+                
+        # S3
+        s3 = lap['Sector3Time'].total_seconds() if pd.notna(lap['Sector3Time']) else None
+        s3_color = "gray"
+        if s3:
+            if s3 < overall_best_s3:
+                overall_best_s3 = s3
+                s3_color = "purple"
+            elif s3 < driver_best_s3[driver]:
+                driver_best_s3[driver] = s3
+                s3_color = "green"
+
+        # Speed Trap (using SpeedST if available, or calc max)
+        st = lap['SpeedST'] if 'SpeedST' in lap and pd.notna(lap['SpeedST']) else 0
+        if st > overall_best_st: overall_best_st = st
+        if st > driver_best_st[driver]: driver_best_st[driver] = st
+        
+        # Store the CURRENT BESTS for this driver at this lap
+        # Requirement: "Best Sector ... times"
+        # So at Lap N, we show the Best S1 they have achieved up to Lap N.
+        
+        cur_best_s1 = driver_best_s1[driver] if driver_best_s1[driver] != float('inf') else 0
+        cur_best_s2 = driver_best_s2[driver] if driver_best_s2[driver] != float('inf') else 0
+        cur_best_s3 = driver_best_s3[driver] if driver_best_s3[driver] != float('inf') else 0
+        cur_best_st = driver_best_st[driver]
+        
+        # Determine colors for these BESTS
+        # If their best == overall best, purple. Else if valid, green (since it's their best).
+        # Wait, comparison with "current overall best".
+        # If at Lap 10, their best is 20.0 and Overall Beest is 19.0 -> Green.
+        
+        c1 = "purple" if (cur_best_s1 == overall_best_s1 and cur_best_s1 > 0) else ("green" if cur_best_s1 > 0 else "gray")
+        c2 = "purple" if (cur_best_s2 == overall_best_s2 and cur_best_s2 > 0) else ("green" if cur_best_s2 > 0 else "gray")
+        c3 = "purple" if (cur_best_s3 == overall_best_s3 and cur_best_s3 > 0) else ("green" if cur_best_s3 > 0 else "gray")
+        
+        lap_sector_data[driver][lap_num] = {
+            'S1': (cur_best_s1, c1),
+            'S2': (cur_best_s2, c2),
+            'S3': (cur_best_s3, c3),
+            'ST': cur_best_st
+        }
+
+    return final_data, common_time, lap_start_times, lap_numbers, race_start_offset, session.weather_data, session.track_status, global_start_time, lap_sector_data
 
 class RaceReplayerApp(ctk.CTk):
     def __init__(self):
@@ -304,8 +395,18 @@ class RaceReplayerApp(ctk.CTk):
         self.status_lbl = ctk.CTkLabel(self.control_frame, text="Ready", text_color="gray")
         self.status_lbl.pack(side="left", padx=20)
 
+        # -- 1.1 Session Info Panel (Weather & Status) --
+        self.session_info_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
+        self.session_info_frame.pack(side="right", padx=20)
+        
+        self.weather_lbl = ctk.CTkLabel(self.session_info_frame, text="Weather: --°C | --%", font=("Mono", 12))
+        self.weather_lbl.pack(side="top", anchor="e")
+        
+        self.track_status_lbl = ctk.CTkLabel(self.session_info_frame, text="TRACK: GREEN", font=("Roboto", 12, "bold"), text_color="#2CC985")
+        self.track_status_lbl.pack(side="bottom", anchor="e")
+
         # -- 2. Leaderboard (Left Side) --
-        self.leaderboard_frame = ctk.CTkFrame(self, width=250, corner_radius=0)
+        self.leaderboard_frame = ctk.CTkFrame(self, width=400, corner_radius=0) # Widened
         self.leaderboard_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
         
         ctk.CTkLabel(self.leaderboard_frame, text="LEADERBOARD", font=("Roboto", 16, "bold"), text_color="#E10600").pack(pady=(15,10))
@@ -313,7 +414,12 @@ class RaceReplayerApp(ctk.CTk):
         header_row = ctk.CTkFrame(self.leaderboard_frame, fg_color="transparent")
         header_row.pack(fill="x", padx=10, pady=2)
         ctk.CTkLabel(header_row, text="POS", width=30, anchor="w", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="DRIVER", width=60, anchor="w", font=("Roboto", 10, "bold")).pack(side="left", padx=5)
+        ctk.CTkLabel(header_row, text="DRIVER", width=50, anchor="w", font=("Roboto", 10, "bold")).pack(side="left", padx=5)
+        ctk.CTkLabel(header_row, text="TYRE", width=40, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
+        ctk.CTkLabel(header_row, text="S1", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
+        ctk.CTkLabel(header_row, text="S2", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
+        ctk.CTkLabel(header_row, text="S3", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
+        ctk.CTkLabel(header_row, text="ST", width=40, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
         ctk.CTkLabel(header_row, text="GAP", width=60, anchor="e", font=("Roboto", 10, "bold")).pack(side="right")
 
         self.scroll_lb = ctk.CTkScrollableFrame(self.leaderboard_frame, fg_color="transparent")
@@ -327,13 +433,25 @@ class RaceReplayerApp(ctk.CTk):
             pos_lbl = ctk.CTkLabel(row_frame, text=f"{i+1}", width=30, font=("Roboto", 12, "bold"))
             pos_lbl.pack(side="left", padx=5)
             
-            drv_lbl = ctk.CTkLabel(row_frame, text="-", font=("Roboto", 12), anchor="w")
-            drv_lbl.pack(side="left", padx=5, fill="x", expand=True)
+            drv_lbl = ctk.CTkLabel(row_frame, text="-", font=("Roboto", 12), width=50, anchor="w")
+            drv_lbl.pack(side="left", padx=5)
+
+            tyre_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 10), width=40, anchor="center")
+            tyre_lbl.pack(side="left")
+
+            s1_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
+            s1_lbl.pack(side="left")
+            s2_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
+            s2_lbl.pack(side="left")
+            s3_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
+            s3_lbl.pack(side="left")
+            st_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=40, anchor="center")
+            st_lbl.pack(side="left")
             
             gap_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 11), width=60, anchor="e")
             gap_lbl.pack(side="right", padx=5)
             
-            self.lb_rows.append((row_frame, pos_lbl, drv_lbl, gap_lbl))
+            self.lb_rows.append((row_frame, pos_lbl, drv_lbl, tyre_lbl, s1_lbl, s2_lbl, s3_lbl, st_lbl, gap_lbl))
 
         # -- 3. Map Canvas (Center/Right) --
         self.map_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#121212")
@@ -348,6 +466,9 @@ class RaceReplayerApp(ctk.CTk):
         self.anim = None
         self.telemetry_data = {}
         self.common_time = []
+        self.weather_data = None
+        self.track_status_data = None
+        self.global_start_time = 0
         self.driver_dots = {}
         self.driver_labels = {}
         self.lap_counter_text = None
@@ -378,7 +499,7 @@ class RaceReplayerApp(ctk.CTk):
             messagebox.showerror("Error", f"Could not load data for {year} {circuit}")
             return
 
-        self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, self.race_start_offset = process_telemetry(session)
+        self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, self.race_start_offset, self.weather_data, self.track_status_data, self.global_start_time, self.lap_sector_data = process_telemetry(session)
         if not self.telemetry_data:
              self.status_lbl.configure(text="No Telemetry Found", text_color="red")
              return
@@ -521,6 +642,48 @@ class RaceReplayerApp(ctk.CTk):
             else:
                 self.lap_counter_text.set_text("GRID")
             
+            # Update Session Info (Weather & Status) - Every 1 second (approx 5 frames)
+            if frame_idx % 5 == 0:
+                try:
+                    current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
+                    
+                    # Weather
+                    if self.weather_data is not None:
+                        # Find closest weather row before current time
+                        w_row = self.weather_data[self.weather_data['Time'] <= current_session_time].iloc[-1]
+                        air_temp = w_row['AirTemp']
+                        humidity = w_row['Humidity']
+                        self.weather_lbl.configure(text=f"Air: {air_temp}°C | Hum: {humidity}%")
+                    
+                    # Track Status
+                    if self.track_status_data is not None:
+                        # Status is often '1' (Green), '2' (Yellow), '4' (SC), '5' (Red), '6' (VSC), '7' (VSC ending)
+                        ts_row = self.track_status_data[self.track_status_data['Time'] <= current_session_time].iloc[-1]
+                        status_code = ts_row['Status']
+                        
+                        status_text = "GREEN"
+                        status_color = "#2CC985"
+                        
+                        if status_code == '1': 
+                            status_text = "GREEN"
+                            status_color = "#2CC985"
+                        elif status_code == '2':
+                            status_text = "YELLOW"
+                            status_color = "#E10600" # Reddish for visibility (or yellow)
+                        elif status_code == '4':
+                            status_text = "SC"
+                            status_color = "orange"
+                        elif status_code in ['6', '7']:
+                            status_text = "VSC"
+                            status_color = "orange"
+                        elif status_code == '5':
+                            status_text = "RED FLAG"
+                            status_color = "red"
+                            
+                        self.track_status_lbl.configure(text=f"TRACK: {status_text}", text_color=status_color)
+                        
+                except: pass
+
             # Update Leaderboard (Every 5th frame)
             if frame_idx % 5 == 0:
                 # SORTING LOGIC: Total Distance
@@ -529,13 +692,72 @@ class RaceReplayerApp(ctk.CTk):
                 active_leaders = [d for d in leaderboard_data if not d[2]]
                 leader_dist = active_leaders[0][1] if active_leaders else 0
                 
-                for i, (row_frame, pos_lbl, drv_lbl, gap_lbl) in enumerate(self.lb_rows):
+                for i, (row_frame, pos_lbl, drv_lbl, tyre_lbl, s1_lbl, s2_lbl, s3_lbl, st_lbl, gap_lbl) in enumerate(self.lb_rows):
                     if i < len(leaderboard_data):
                         row_frame.pack(fill="x", pady=2)
                         drv, dist, is_dnf = leaderboard_data[i]
                         
                         drv_lbl.configure(text=drv)
                         
+                        # Tyre Logic
+                        tyre_text = ""
+                        tyre_color = "white"
+                        try:
+                            # Find current lap for driver
+                            d_laps = self.telemetry_data[drv]['Laps']
+                            # We can approximate current lap by finding lap where Cumulative Time > current_session_time
+                            # Or simpler: use our lap counter logic but per driver?
+                            # Let's use the 'LapNumber' from d_laps based on time
+                            
+                            # Filter laps that have started
+                            # current_session_time is a Timedelta
+                            current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
+                            
+                            current_lap = d_laps[d_laps['LapStartTime'] <= current_session_time].iloc[-1]
+                            compound = current_lap['Compound']
+                            age = int(current_lap['TyreLife'])
+                            
+                            comp_code = compound[0] if compound else "?"
+                            tyre_text = f"{comp_code} ({age})"
+                            
+                            if comp_code == 'S': tyre_color = "red"
+                            elif comp_code == 'M': tyre_color = "yellow"
+                            elif comp_code == 'H': tyre_color = "white"
+                            elif comp_code == 'I': tyre_color = "green"
+                            elif comp_code == 'W': tyre_color = "cyan"
+                            
+                        except: pass
+                        
+                        tyre_lbl.configure(text=tyre_text, text_color=tyre_color)
+                        
+                        # Sector & Speed Logic
+                        # Use same current_lap_num identified above?
+                        # We need 'current_lap' object from Tyre block or calc again
+                        # Assuming 'current_lap' is available if tyre block succeeded, else use default.
+                        try:
+                             # Get prev completed lap for best sectors? OR current lap if we have live data?
+                             # We stored "Best up to Lap N" in lap_sector_data
+                             # So we just use Current Lap Number
+                             
+                             ln = int(current_lap['LapNumber'])
+                             if drv in self.lap_sector_data and ln in self.lap_sector_data[drv]:
+                                 s_data = self.lap_sector_data[drv][ln]
+                                 
+                                 s1, c1 = s_data['S1']
+                                 s2, c2 = s_data['S2']
+                                 s3, c3 = s_data['S3']
+                                 st = s_data['ST']
+                                 
+                                 s1_lbl.configure(text=f"{s1:.1f}" if s1>0 else "-", text_color=c1)
+                                 s2_lbl.configure(text=f"{s2:.1f}" if s2>0 else "-", text_color=c2)
+                                 s3_lbl.configure(text=f"{s3:.1f}" if s3>0 else "-", text_color=c3)
+                                 st_lbl.configure(text=f"{int(st)}" if st>0 else "-")
+                        except:
+                             s1_lbl.configure(text="-", text_color="gray")
+                             s2_lbl.configure(text="-", text_color="gray")
+                             s3_lbl.configure(text="-", text_color="gray")
+                             st_lbl.configure(text="-")
+
                         if is_dnf:
                              gap_lbl.configure(text="DNF", text_color="red")
                              drv_lbl.configure(text_color="gray")
