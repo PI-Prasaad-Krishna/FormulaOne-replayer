@@ -478,7 +478,10 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         ax.invert_yaxis()
         ax.tick_params(colors="white")
         ax.set_title("Position Changes", color="white")
-        # ax.legend() # Too crowded
+        # Add legend outside the plot to avoid clutter
+        ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0., 
+                  facecolor='#333', labelcolor='white', fontsize='small')
+        fig.tight_layout()
         
         canvas = FigureCanvasTkAgg(fig, master=self.pos_frame)
         canvas.get_tk_widget().pack(fill="both", expand=True)
