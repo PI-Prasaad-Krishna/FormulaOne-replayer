@@ -66,6 +66,15 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         self.btn_pos = ctk.CTkButton(self.sidebar, text="Position Chart", command=lambda: self.show_page("position"), fg_color="transparent", border_width=1)
         self.btn_pos.pack(pady=10, padx=20, fill="x")
 
+        # Navigation Buttons Map
+        self.nav_buttons = {
+            "telemetry": self.btn_telemetry,
+            "strategy": self.btn_strategy,
+            "track": self.btn_track,
+            "dna": self.btn_dna,
+            "position": self.btn_pos
+        }
+
         # --- Main Content Area ---
         self.content_area = ctk.CTkFrame(self, corner_radius=0, fg_color="#121212")
         self.content_area.grid(row=0, column=1, sticky="nsew")
@@ -74,6 +83,13 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         self.show_page("telemetry")
 
     def show_page(self, page_name):
+        # Update styling for sidebar buttons
+        for name, btn in self.nav_buttons.items():
+            if name == page_name:
+                btn.configure(fg_color="#E10600")
+            else:
+                btn.configure(fg_color="transparent")
+
         # Clear content area
         for widget in self.content_area.winfo_children():
             widget.destroy()
@@ -196,6 +212,7 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         for widget in self.strategy_frame.winfo_children(): widget.destroy()
         
         fig, ax = plt.subplots(2, 1, figsize=(10, 8), facecolor='#121212')
+        fig.subplots_adjust(hspace=0.4) # Better spacing
         
         # 1. Lap Time Evolution
         ax[0].set_facecolor('#121212')
@@ -440,12 +457,19 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         ax.set_facecolor('#121212')
         
         drivers = session.drivers
-        for drv in drivers:
+        # Fallback colors if FastF1 returns white/none or fails
+        fallback_colors = plt.cm.tab20.colors 
+        
+        for i, drv in enumerate(drivers):
              laps = session.laps.pick_drivers(drv)
              try:
                  color = fastf1.plotting.get_driver_color(drv, session=session)
              except:
-                 color = "white"
+                 color = None
+            
+             # If color is invalid or white (often default fallback), use our fallback list
+             if not color or color.lower() in ['white', '#ffffff']:
+                 color = fallback_colors[i % len(fallback_colors)]
                  
              ax.plot(laps['LapNumber'], laps['Position'], color=color, label=drv)
              

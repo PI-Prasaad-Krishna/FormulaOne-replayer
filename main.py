@@ -24,7 +24,7 @@ class MainApp(ctk.CTk):
         self.main_frame.grid_columnconfigure(0, weight=1)
         
         # Header
-        ctk.CTkLabel(self.main_frame, text="F1 VISUALIZER PRO", font=("Roboto", 40, "bold"), text_color="#E10600").pack(pady=(60, 20))
+        ctk.CTkLabel(self.main_frame, text="F1 VISUALIZER", font=("Roboto", 40, "bold"), text_color="#E10600").pack(pady=(60, 20))
         ctk.CTkLabel(self.main_frame, text="Select Mode", font=("Roboto", 20), text_color="gray").pack(pady=(0, 40))
         
         # Buttons
