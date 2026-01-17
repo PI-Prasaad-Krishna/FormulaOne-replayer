@@ -19,14 +19,15 @@ import pandas as pd
 import numpy as np
 import threading
 import os
+from scipy.interpolate import splprep, splev
 
 # Configure appearance
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-class AnalyticsDashboardApp(ctk.CTkToplevel):
-    def __init__(self, parent=None):
-        super().__init__(parent)
+class AnalyticsDashboardApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
         self.title("F1 Analytics Dashboard 2025")
         self.geometry("1400x900")
         
@@ -66,13 +67,17 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         self.btn_pos = ctk.CTkButton(self.sidebar, text="Position Chart", command=lambda: self.show_page("position"), fg_color="transparent", border_width=1)
         self.btn_pos.pack(pady=10, padx=20, fill="x")
 
+        self.btn_lines = ctk.CTkButton(self.sidebar, text="Race Lines", command=lambda: self.show_page("race_lines"), fg_color="transparent", border_width=1)
+        self.btn_lines.pack(pady=10, padx=20, fill="x")
+
         # Navigation Buttons Map
         self.nav_buttons = {
             "telemetry": self.btn_telemetry,
             "strategy": self.btn_strategy,
             "track": self.btn_track,
             "dna": self.btn_dna,
-            "position": self.btn_pos
+            "position": self.btn_pos,
+            "race_lines": self.btn_lines
         }
 
         # --- Main Content Area ---
@@ -104,6 +109,8 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
             self.create_dna_page()
         elif page_name == "position":
             self.create_position_page()
+        elif page_name == "race_lines":
+            self.create_race_lines_page()
 
     def load_session(self):
         # Helper to load session if not loaded (hardcoded 2023 Abu Dhabi for demo or add inputs)
@@ -486,6 +493,204 @@ class AnalyticsDashboardApp(ctk.CTkToplevel):
         canvas = FigureCanvasTkAgg(fig, master=self.pos_frame)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         canvas.draw()
+
+    def create_race_lines_page(self):
+        ctk.CTkLabel(self.content_area, text="Race Line Comparison", font=("Roboto", 24, "bold")).pack(pady=10)
+        
+        controls = ctk.CTkFrame(self.content_area)
+        controls.pack(pady=10)
+        
+        self.rl_d1_var = ctk.StringVar(value="VER")
+        self.rl_d2_var = ctk.StringVar(value="HAM")
+        
+        ctk.CTkEntry(controls, textvariable=self.rl_d1_var, width=60).pack(side="left", padx=10)
+        ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
+        ctk.CTkEntry(controls, textvariable=self.rl_d2_var, width=60).pack(side="left", padx=10)
+        
+        ctk.CTkButton(controls, text="Analyze Race Lines", command=self.plot_race_lines, fg_color="#E10600").pack(side="left", padx=20)
+        
+        ctk.CTkLabel(self.content_area, text="Click on track to zoom in/out", font=("Roboto", 12), text_color="gray").pack()
+
+        self.race_lines_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        self.race_lines_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+    def smooth_track_data(self, x, y, s=None, n_points=None):
+        """Smooths track data using B-spline interpolation."""
+        if len(x) < 4: return x, y
+        if n_points is None: n_points = len(x)
+        try:
+             # Remove duplicates for splprep
+             points = np.vstack((x, y)).T
+             _, idx = np.unique(points, axis=0, return_index=True)
+             idx.sort()
+             x = x[idx]
+             y = y[idx]
+             if len(x) < 4: return x, y
+             
+             tck, u = splprep([x, y], s=s, per=0) 
+             u_new = np.linspace(u.min(), u.max(), n_points)
+             x_new, y_new = splev(u_new, tck)
+             return x_new, y_new
+        except Exception as e:
+             print(f"Smoothing failed: {e}")
+             return x, y
+
+    def generate_track_ribbon(self, x, y, width=120):
+        """Generates inner and outer track edges with curvature-based shifting."""
+        # Calculate gradients
+        dx = np.gradient(x)
+        dy = np.gradient(y)
+        ddx = np.gradient(dx)
+        ddy = np.gradient(dy)
+        
+        # Normals
+        ds = np.sqrt(dx**2 + dy**2)
+        ds[ds==0] = 1.0 
+        
+        nx = -dy / ds
+        ny = dx / ds
+        
+        # Calculate Curvature (signed)
+        # k = (dx*ddy - dy*ddx) / (dx^2 + dy^2)^1.5
+        k = (dx * ddy - dy * ddx) / (ds**3)
+        
+        # Shift Logic:
+        # If k > 0 (Left Turn), center of curvature is Left (Normal direction).
+        # We want the Racing Line (x,y) to be on the Left edge (Apex).
+        # So we need to shift the Track Center to the Right (Opposite Normal).
+        # So shift should be negative proportional to k.
+        
+        # Limit shift to slightly less than half width to ensure line stays within track
+        max_shift = width * 0.45 
+        
+        # Scale factor: tuned manually. 
+        # k values are small (e.g. 1e-3). Width is ~80.
+        # We want k~high to give shift~max_shift.
+        # Let's normalize k roughly.
+        k_max_est = np.max(np.abs(k))
+        if k_max_est == 0: k_max_est = 1.0
+        
+        shift_factor = k / k_max_est * max_shift * -1.2 # Boost a bit to ensure hitting apex
+        
+        # Apply clamping
+        shift_factor = np.clip(shift_factor, -max_shift, max_shift)
+        
+        # Shifted Center
+        x_c = x + nx * shift_factor
+        y_c = y + ny * shift_factor
+        
+        # Edges from new center
+        x_out = x_c + nx * width * 0.5
+        y_out = y_c + ny * width * 0.5
+        
+        x_in = x_c - nx * width * 0.5
+        y_in = y_c - ny * width * 0.5
+        
+        return x_out, y_out, x_in, y_in
+
+    def plot_race_lines(self):
+        session = self.load_session()
+        if not session: return
+        
+        d1 = self.rl_d1_var.get().upper()
+        d2 = self.rl_d2_var.get().upper()
+        
+        try:
+            laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
+            laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
+            
+            tel_d1 = laps_d1.get_telemetry()
+            tel_d2 = laps_d2.get_telemetry()
+            
+            # Get track reference
+            fastest_lap = session.laps.pick_fastest()
+            tel_track = fastest_lap.get_telemetry()
+            
+            x_track, y_track = tel_track['X'].to_numpy(), tel_track['Y'].to_numpy()
+            
+            # 1. Smooth the track center line
+            x_track_smooth, y_track_smooth = self.smooth_track_data(x_track, y_track, s=10000, n_points=len(x_track)*5)
+            
+            # 2. Generate Ribbon with Apex Logic
+            x_out, y_out, x_in, y_in = self.generate_track_ribbon(x_track_smooth, y_track_smooth, width=90)
+            
+            # 3. Smooth Driver Lines
+            x_d1, y_d1 = tel_d1['X'].to_numpy(), tel_d1['Y'].to_numpy()
+            x_d2, y_d2 = tel_d2['X'].to_numpy(), tel_d2['Y'].to_numpy()
+            
+            x_d1_s, y_d1_s = self.smooth_track_data(x_d1, y_d1, s=0, n_points=len(x_d1)*3)
+            x_d2_s, y_d2_s = self.smooth_track_data(x_d2, y_d2, s=0, n_points=len(x_d2)*3)
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not load data for drivers: {e}")
+            return
+
+        c1 = fastf1.plotting.get_driver_color(d1, session=session)
+        c2 = fastf1.plotting.get_driver_color(d2, session=session)
+        
+        for widget in self.race_lines_frame.winfo_children(): widget.destroy()
+        
+        fig, ax = plt.subplots(figsize=(10, 8), facecolor='#121212')
+        ax.set_facecolor('#121212')
+        
+        # Plot Track Ribbon
+        poly_x = np.concatenate([x_out, x_in[::-1]])
+        poly_y = np.concatenate([y_out, y_in[::-1]])
+        
+        # Use a nice dark gray for asphalt
+        ax.fill(poly_x, poly_y, color='#252525', zorder=1, label="Track Surface")
+        
+        # Optional: Plot borders
+        ax.plot(x_out, y_out, color='#444444', linewidth=0.5, zorder=1.5)
+        ax.plot(x_in, y_in, color='#444444', linewidth=0.5, zorder=1.5)
+        
+        # Plot Driver Lines
+        ax.plot(x_d1_s, y_d1_s, color=c1, label=d1, linewidth=2, zorder=2)
+        ax.plot(x_d2_s, y_d2_s, color=c2, label=d2, linewidth=2, linestyle='--', zorder=3)
+        
+        ax.set_title(f"Race Line Comparison: {d1} vs {d2}", color="white")
+        ax.axis('equal')
+        ax.axis('off')
+        
+        # Custom Legend
+        legend_lines = [
+            plt.Line2D([0], [0], color=c1, linewidth=2, label=d1),
+            plt.Line2D([0], [0], color=c2, linewidth=2, linestyle='--', label=d2),
+            plt.Rectangle((0,0), 1, 1, facecolor='#252525', edgecolor='#444444', label='Track')
+        ]
+        ax.legend(handles=legend_lines, facecolor='#333', labelcolor='white')
+        
+        self.rl_ax = ax
+        self.rl_is_zoomed = False
+        self.rl_fig = fig
+        
+        canvas = FigureCanvasTkAgg(fig, master=self.race_lines_frame)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.draw()
+        
+        self.rl_canvas = canvas
+        
+        # Click event for zoom
+        def on_click(event):
+            if event.inaxes != self.rl_ax: return
+            if event.button != 1: return # Left click only
+            
+            if self.rl_is_zoomed:
+                self.rl_ax.autoscale()
+                self.rl_is_zoomed = False
+            else:
+                x, y = event.xdata, event.ydata
+                # Zoom radius: 
+                # If width is 80 (approx 8m?), then zoom radius of 600 means 60m?
+                # Let's try 600.
+                zoom_radius = 600 
+                self.rl_ax.set_xlim(x - zoom_radius, x + zoom_radius)
+                self.rl_ax.set_ylim(y - zoom_radius, y + zoom_radius)
+                self.rl_is_zoomed = True
+                
+            self.rl_canvas.draw()
+            
+        fig.canvas.mpl_connect('button_press_event', on_click)
 
     def add_placeholder_plot(self, title):
         fig, ax = plt.subplots(figsize=(8, 5), facecolor='#121212')

@@ -1,65 +1,48 @@
-**F1 Telemetry Race Replayer** 🏎️
+**F1 Visualizer Hub** 🏎️
 
-An interactive Python tool that visualizes Formula 1 races by replaying "ghost cars" using telemetry from the FastF1 library.
+An interactive Python tool suite for analyzing and visualizing Formula 1 races using telemetry from the FastF1 library.
 
 **Overview**
 
-This project replays full race telemetry as a live, animated "ghost race" so you can observe gaps, cornering speed, and battles for position over time.
-
-The app is optimized for full race sessions and works with cached session files stored in the `f1_cache/` folder (see the repository layout).
+This project consists of two main applications accessible via a central hub (`main.py`):
+1.  **Race Replayer**: Replays "ghost cars" to visualize the race flow.
+2.  **Analytics Dashboard**: A comprehensive suite for deep-dive analysis.
 
 **Features**
 
-- Interactive GUI for selecting year, event, and playback speed (tkinter).
-- Full-race replay with smooth animation via interpolation.
-- Adjustable playback speed (e.g., 1x–50x).
-- Handles missing telemetry (DNFs) and normalizes start times.
+### 📊 Analytics Dashboard (New!)
+-   **Race Line Comparison**: Compare driver lines on a realistic track surface.
+    -   **Apex Logic**: Visualizes the track ribbon with curvature-based shifting to show drivers hitting the apex.
+    -   **Zoom Support**: Click to zoom in on corners for detailed analysis.
+    -   **Smooth Visuals**: Uses B-spline interpolation for high-quality lines.
+-   **Telemetry Battle**: Head-to-head speed and throttle/brake analysis.
+-   **Race Strategy**: Visualizes lap time evolution and tyre history.
+-   **Track Dominance**: Speed and gear shift maps.
+-   **Driver DNA**: Radar charts comparing driver performance stats.
+-   **Position Chart**: Lap-by-lap position changes.
+
+### 🏁 Race Replayer
+-   Full-race replay with smooth animation.
+-   Adjustable playback speed (1x–50x).
+-   Handles missing telemetry (DNFs).
 
 **Requirements**
 
-- Python 3.8 or newer
-- Packages: `fastf1`, `matplotlib`, `pandas`
-- `tkinter` (usually included with standard Python on Windows)
+-   Python 3.8 or newer
+-   Packages: `fastf1`, `matplotlib`, `pandas`, `customtkinter`, `scipy`
 
-Install requirements with pip:
-
+Install requirements:
 ```bash
-pip install fastf1 matplotlib pandas
+pip install fastf1 matplotlib pandas customtkinter scipy
 ```
 
 **Quick Start**
 
-1. Place or cache FastF1 session files under the `f1_cache/` folder (the code creates it for you if you dont have it).
-2. Run the replayer:
-
+1.  Run the main hub:
 ```bash
-python race_replayer.py
+python main.py
 ```
-
-3. In the GUI:
-- Enter the **Year** (for example, `2023`).
-- Enter the **Circuit** or event name (e.g., `Abu Dhabi`).
-- Choose a **Speed** multiplier.
-- Click **Load Full Race** to start the replay.
-
-**Notes & Troubleshooting**
-
-- If `tkinter` isn't available on your Python install, install the appropriate system package or use a Python installer that includes it.
-- The app will use cached files in `f1_cache/` when available — this avoids repeated downloads via FastF1.
-
-**How it works (brief)**
-
-- Uses FastF1 to obtain telemetry and lap data.
-- Extracts and normalizes telemetry per driver so all sessions align to a common timeline.
-- Re-samples to a regular timeline and animates driver positions using Matplotlib's `FuncAnimation` embedded in a tkinter window.
-
-**Future Improvements**
-
-- Add a lap counter and live leaderboard.
-- Smoother animation (soon ig? I'll try)
-- Visualize pit stops and additional session types.
-- Allow selecting subsets of drivers for focused replays.
+2.  Select **Race Replayer** or **Analytics Dashboard**.
 
 **Acknowledgments**
-
-This is a fan project — not affiliated with Formula 1, the FIA, or official FastF1 maintainers. Thanks to the FastF1 and Matplotlib projects for the tooling and data access.
+Thanks to FastF1 and Matplotlib. Not affiliated with Formula 1.
