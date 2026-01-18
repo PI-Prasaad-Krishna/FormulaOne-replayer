@@ -25,6 +25,8 @@ This project consists of two main applications accessible via a central hub (`ma
 -   Full-race replay with smooth animation.
 -   Adjustable playback speed (1x–50x).
 -   Handles missing telemetry (DNFs).
+-   Leaderboard Improvements (On the way..probably 🤷‍♂️)
+-   Current Tyre type Indicator (Working on it)
 
 **Requirements**
 
