@@ -112,7 +112,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         elif page_name == "race_lines":
             self.create_race_lines_page()
 
-    def load_session(self):
+    def load_session(self, session_type='R'):
         # Helper to load session if not loaded (hardcoded 2023 Abu Dhabi for demo or add inputs)
         # For simplicity, we'll use a dialog or just 2023 Abu Dhabi
         try:
@@ -122,7 +122,7 @@ class AnalyticsDashboardApp(ctk.CTk):
              messagebox.showerror("Error", "Invalid Year")
              return None
              
-        status_lbl = ctk.CTkLabel(self.sidebar, text="Loading Data...", text_color="orange")
+        status_lbl = ctk.CTkLabel(self.sidebar, text=f"Loading {session_type} Data...", text_color="orange")
         status_lbl.pack(side="bottom", pady=10)
         self.update()
         
@@ -131,7 +131,13 @@ class AnalyticsDashboardApp(ctk.CTk):
             if not os.path.exists("f1_cache"): os.makedirs("f1_cache")
             fastf1.Cache.enable_cache("f1_cache")
             
-            session = fastf1.get_session(year, circuit, 'R')
+            # Map full name to identifier if needed, but 'Race'/'Qualifying' -> 'R'/'Q'
+            identifier = 'R'
+            if session_type.lower().startswith('q'): identifier = 'Q'
+            elif session_type.lower().startswith('r'): identifier = 'R'
+            else: identifier = session_type # Trace or others
+            
+            session = fastf1.get_session(year, circuit, identifier)
             session.load(telemetry=True, laps=True, weather=False)
             status_lbl.destroy()
             return session
@@ -148,6 +154,9 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.d1_var = ctk.StringVar(value="VER")
         self.d2_var = ctk.StringVar(value="HAM")
+        self.tel_session_var = ctk.StringVar(value="Race")
+        
+        ctk.CTkOptionMenu(controls, variable=self.tel_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=10)
         
         ctk.CTkEntry(controls, textvariable=self.d1_var, width=60).pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
@@ -159,7 +168,8 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.telemetry_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
     def plot_telemetry(self):
-        session = self.load_session()
+        session_type = self.tel_session_var.get()
+        session = self.load_session(session_type)
         if not session: return
         
         d1 = self.d1_var.get().upper()
@@ -287,14 +297,33 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         btn_frame = ctk.CTkFrame(self.content_area)
         btn_frame.pack(pady=10)
+        
+        self.track_session_var = ctk.StringVar(value="Race")
+        ctk.CTkOptionMenu(btn_frame, variable=self.track_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=5)
+        
         ctk.CTkButton(btn_frame, text="Gear Shift Map", command=self.plot_gear_map, fg_color="#E10600").pack(side="left", padx=10)
         ctk.CTkButton(btn_frame, text="Speed Map", command=self.plot_speed_map, fg_color="#2CC985").pack(side="left", padx=10)
+        
+        # Track Dominance Inputs
+        dom_frame = ctk.CTkFrame(self.content_area)
+        dom_frame.pack(pady=5)
+        
+        self.dom_d1_var = ctk.StringVar(value="VER")
+        self.dom_d2_var = ctk.StringVar(value="HAM")
+        
+        ctk.CTkLabel(dom_frame, text="Dominance:").pack(side="left", padx=5)
+        ctk.CTkEntry(dom_frame, textvariable=self.dom_d1_var, width=50).pack(side="left", padx=5)
+        ctk.CTkLabel(dom_frame, text="vs").pack(side="left", padx=5)
+        ctk.CTkEntry(dom_frame, textvariable=self.dom_d2_var, width=50).pack(side="left", padx=5)
+        
+        ctk.CTkButton(dom_frame, text="Show Dominance", command=self.plot_track_dominance, fg_color="#FF8700").pack(side="left", padx=10)
         
         self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def plot_gear_map(self):
-        session = self.load_session()
+        session_type = self.track_session_var.get()
+        session = self.load_session(session_type)
         if not session: return
         
         # Pick fastest lap of the session
@@ -339,7 +368,8 @@ class AnalyticsDashboardApp(ctk.CTk):
 
     def plot_speed_map(self):
         # Similar but Speed
-        session = self.load_session()
+        session_type = self.track_session_var.get()
+        session = self.load_session(session_type)
         if not session: return
         lap = session.laps.pick_fastest()
         tel = lap.get_telemetry()
@@ -374,6 +404,99 @@ class AnalyticsDashboardApp(ctk.CTk):
         canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         canvas.draw()
+
+    def plot_track_dominance(self):
+        session_type = self.track_session_var.get()
+        session = self.load_session(session_type)
+        if not session: return
+        
+        d1 = self.dom_d1_var.get().upper()
+        d2 = self.dom_d2_var.get().upper()
+        
+        try:
+            laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
+            laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
+            
+            if laps_d1 is None or laps_d2 is None:
+                messagebox.showerror("Error", "Brief data not available for one or both drivers.")
+                return
+
+            # Telemetry
+            tel_d1 = laps_d1.get_telemetry().add_distance()
+            tel_d2 = laps_d2.get_telemetry().add_distance()
+            
+            # Create a common distance array
+            total_dist = max(tel_d1['Distance'].max(), tel_d2['Distance'].max())
+            dist = np.linspace(0, total_dist, num=100) # 100 minisectors
+            
+            # Interpolate Time
+            t1 = np.interp(dist, tel_d1['Distance'], tel_d1['Time'].dt.total_seconds())
+            t2 = np.interp(dist, tel_d2['Distance'], tel_d2['Time'].dt.total_seconds())
+            
+            # Calculate delta for each segment
+            dt1 = np.diff(t1)
+            dt2 = np.diff(t2)
+            
+            # Determine dominant driver for each segment
+            dominance = []
+            for i in range(len(dt1)):
+                if dt1[i] < dt2[i]:
+                    dominance.append(1) # D1
+                else:
+                    dominance.append(2) # D2
+                    
+            # Get coords for segments
+            x_track = tel_d1['X'].to_numpy()
+            y_track = tel_d1['Y'].to_numpy()
+            dist_track = tel_d1['Distance'].to_numpy()
+            
+            x_interp = np.interp(dist, dist_track, x_track)
+            y_interp = np.interp(dist, dist_track, y_track)
+            
+            points = np.array([x_interp, y_interp]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            
+            # Plot
+            for widget in self.track_frame.winfo_children(): widget.destroy()
+            fig, ax = plt.subplots(figsize=(8, 6), facecolor='#121212')
+            ax.set_facecolor('#121212')
+            
+            import matplotlib.collections as mcoll
+            from matplotlib.colors import ListedColormap, BoundaryNorm
+            
+            c1 = fastf1.plotting.get_driver_color(d1, session=session)
+            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            
+            # Create custom colormap
+            cmap = ListedColormap([c1, c2])
+            norm = BoundaryNorm([0.5, 1.5, 2.5], cmap.N)
+            
+            lc = mcoll.LineCollection(segments, cmap=cmap, norm=norm)
+            lc.set_array(np.array(dominance))
+            lc.set_linewidth(5)
+            
+            ax.add_collection(lc)
+            ax.axis('off')
+            ax.set_aspect('equal')
+            
+            # Custom Legend
+            legend_lines = [
+                plt.Line2D([0], [0], color=c1, linewidth=4, label=d1),
+                plt.Line2D([0], [0], color=c2, linewidth=4, label=d2)
+            ]
+            ax.legend(handles=legend_lines, facecolor='#333', labelcolor='white')
+            
+            ax.set_title(f"Track Dominance: {d1} vs {d2} ({session_type})", color="white")
+            ax.autoscale_view()
+            
+            canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas.draw()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Analysis Failed: {e}")
+            print(e)
+            return
 
     def create_dna_page(self):
         ctk.CTkLabel(self.content_area, text="Driver DNA", font=("Roboto", 24, "bold")).pack(pady=10)
@@ -695,8 +818,8 @@ class AnalyticsDashboardApp(ctk.CTk):
     def add_placeholder_plot(self, title):
         fig, ax = plt.subplots(figsize=(8, 5), facecolor='#121212')
         ax.set_facecolor('#121212')
-        ax.text(0.5, 0.5, f"[ {title} Graph Here ]\n\nLoad Data to View", 
-                color='white', ha='center', va='center', fontsize=14)
+        ax.text(0.5, 0.5, f"{title}\n\nSelect Drivers & Session to Start Analysis", 
+                color='gray', ha='center', va='center', fontsize=14, fontfamily="Roboto")
         ax.axis('off')
         
         canvas = FigureCanvasTkAgg(fig, master=self.content_area)
