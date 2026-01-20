@@ -207,7 +207,8 @@ def process_telemetry(session):
             "Color": data["Color"],
             "Team": data["Team"],
             "EndTime": driver_end_time,
-            "IsDNF": is_dnf_overall
+            "IsDNF": is_dnf_overall,
+            "Laps": data["Laps"]
         }
     
     # Calculate Lap Start Times (for the Lap Counter)
@@ -415,12 +416,8 @@ class RaceReplayerApp(ctk.CTk):
         header_row.pack(fill="x", padx=10, pady=2)
         ctk.CTkLabel(header_row, text="POS", width=30, anchor="w", font=("Roboto", 10, "bold")).pack(side="left")
         ctk.CTkLabel(header_row, text="DRIVER", width=50, anchor="w", font=("Roboto", 10, "bold")).pack(side="left", padx=5)
-        ctk.CTkLabel(header_row, text="TYRE", width=40, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="S1", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="S2", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="S3", width=35, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="ST", width=40, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
-        ctk.CTkLabel(header_row, text="GAP", width=60, anchor="e", font=("Roboto", 10, "bold")).pack(side="right")
+        ctk.CTkLabel(header_row, text="TYRE", width=70, anchor="center", font=("Roboto", 10, "bold")).pack(side="left")
+        ctk.CTkLabel(header_row, text="GAP", width=80, anchor="e", font=("Roboto", 10, "bold")).pack(side="left", padx=5)
 
         self.scroll_lb = ctk.CTkScrollableFrame(self.leaderboard_frame, fg_color="transparent")
         self.scroll_lb.pack(fill="both", expand=True, padx=5, pady=5)
@@ -436,22 +433,13 @@ class RaceReplayerApp(ctk.CTk):
             drv_lbl = ctk.CTkLabel(row_frame, text="-", font=("Roboto", 12), width=50, anchor="w")
             drv_lbl.pack(side="left", padx=5)
 
-            tyre_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 10), width=40, anchor="center")
+            tyre_lbl = ctk.CTkLabel(row_frame, text="?", font=("Mono", 10), width=70, anchor="center")
             tyre_lbl.pack(side="left")
 
-            s1_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
-            s1_lbl.pack(side="left")
-            s2_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
-            s2_lbl.pack(side="left")
-            s3_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=35, anchor="center")
-            s3_lbl.pack(side="left")
-            st_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 9), width=40, anchor="center")
-            st_lbl.pack(side="left")
+            gap_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 11), width=80, anchor="e")
+            gap_lbl.pack(side="left", padx=5)
             
-            gap_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 11), width=60, anchor="e")
-            gap_lbl.pack(side="right", padx=5)
-            
-            self.lb_rows.append((row_frame, pos_lbl, drv_lbl, tyre_lbl, s1_lbl, s2_lbl, s3_lbl, st_lbl, gap_lbl))
+            self.lb_rows.append((row_frame, pos_lbl, drv_lbl, tyre_lbl, gap_lbl))
 
         # -- 3. Map Canvas (Center/Right) --
         self.map_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#121212")
@@ -692,7 +680,7 @@ class RaceReplayerApp(ctk.CTk):
                 active_leaders = [d for d in leaderboard_data if not d[2]]
                 leader_dist = active_leaders[0][1] if active_leaders else 0
                 
-                for i, (row_frame, pos_lbl, drv_lbl, tyre_lbl, s1_lbl, s2_lbl, s3_lbl, st_lbl, gap_lbl) in enumerate(self.lb_rows):
+                for i, (row_frame, pos_lbl, drv_lbl, tyre_lbl, gap_lbl) in enumerate(self.lb_rows):
                     if i < len(leaderboard_data):
                         row_frame.pack(fill="x", pady=2)
                         drv, dist, is_dnf = leaderboard_data[i]
@@ -700,63 +688,52 @@ class RaceReplayerApp(ctk.CTk):
                         drv_lbl.configure(text=drv)
                         
                         # Tyre Logic
-                        tyre_text = ""
+                        tyre_text = "?"
                         tyre_color = "white"
                         try:
                             # Find current lap for driver
                             d_laps = self.telemetry_data[drv]['Laps']
-                            # We can approximate current lap by finding lap where Cumulative Time > current_session_time
-                            # Or simpler: use our lap counter logic but per driver?
-                            # Let's use the 'LapNumber' from d_laps based on time
                             
+                            compound = "Unknown"
                             # Filter laps that have started
-                            # current_session_time is a Timedelta
                             current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
                             
-                            current_lap = d_laps[d_laps['LapStartTime'] <= current_session_time].iloc[-1]
-                            compound = current_lap['Compound']
-                            age = int(current_lap['TyreLife'])
+                            started_laps = d_laps[d_laps['LapStartTime'] <= current_session_time]
+                            if not started_laps.empty:
+                                current_lap = started_laps.iloc[-1]
+                                compound = str(current_lap['Compound']).upper()
+                            else:
+                                # Fallback to first lap if race hasn't started for them
+                                if not d_laps.empty:
+                                    current_lap = d_laps.iloc[0]
+                                    compound = str(current_lap['Compound']).upper()
+
+                            if 'SOFT' in compound:
+                                tyre_text = "Soft"
+                                tyre_color = "#FF3333" # Red
+                            elif 'MEDIUM' in compound:
+                                tyre_text = "Medium"
+                                tyre_color = "#FFE000" # Yellow
+                            elif 'HARD' in compound:
+                                tyre_text = "Hard"
+                                tyre_color = "white"
+                            elif 'INTER' in compound:
+                                tyre_text = "Inter"
+                                tyre_color = "#39B54A" # Green
+                            elif 'WET' in compound:
+                                tyre_text = "Wet"
+                                tyre_color = "#00AEEF" # Cyan
+                            else:
+                                # Show first 3 chars if unknown/NAN
+                                tyre_text = compound[:3] if compound and compound != "NAN" else "?"
+                                tyre_color = "gray"
                             
-                            comp_code = compound[0] if compound else "?"
-                            tyre_text = f"{comp_code} ({age})"
-                            
-                            if comp_code == 'S': tyre_color = "red"
-                            elif comp_code == 'M': tyre_color = "yellow"
-                            elif comp_code == 'H': tyre_color = "white"
-                            elif comp_code == 'I': tyre_color = "green"
-                            elif comp_code == 'W': tyre_color = "cyan"
-                            
-                        except: pass
+                        except Exception as e: 
+                            print(f"Tyre Error {drv}: {e}")
+                            print(f"Columns: {d_laps.columns}")
+                            tyre_text = "Err"
                         
                         tyre_lbl.configure(text=tyre_text, text_color=tyre_color)
-                        
-                        # Sector & Speed Logic
-                        # Use same current_lap_num identified above?
-                        # We need 'current_lap' object from Tyre block or calc again
-                        # Assuming 'current_lap' is available if tyre block succeeded, else use default.
-                        try:
-                             # Get prev completed lap for best sectors? OR current lap if we have live data?
-                             # We stored "Best up to Lap N" in lap_sector_data
-                             # So we just use Current Lap Number
-                             
-                             ln = int(current_lap['LapNumber'])
-                             if drv in self.lap_sector_data and ln in self.lap_sector_data[drv]:
-                                 s_data = self.lap_sector_data[drv][ln]
-                                 
-                                 s1, c1 = s_data['S1']
-                                 s2, c2 = s_data['S2']
-                                 s3, c3 = s_data['S3']
-                                 st = s_data['ST']
-                                 
-                                 s1_lbl.configure(text=f"{s1:.1f}" if s1>0 else "-", text_color=c1)
-                                 s2_lbl.configure(text=f"{s2:.1f}" if s2>0 else "-", text_color=c2)
-                                 s3_lbl.configure(text=f"{s3:.1f}" if s3>0 else "-", text_color=c3)
-                                 st_lbl.configure(text=f"{int(st)}" if st>0 else "-")
-                        except:
-                             s1_lbl.configure(text="-", text_color="gray")
-                             s2_lbl.configure(text="-", text_color="gray")
-                             s3_lbl.configure(text="-", text_color="gray")
-                             st_lbl.configure(text="-")
 
                         if is_dnf:
                              gap_lbl.configure(text="DNF", text_color="red")
