@@ -46,11 +46,11 @@ except:
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
-def get_driver_color(driver_code):
+def get_driver_color(driver_code, session=None):
     try:
         # Check if new function exists (fastf1 v3.1+)
         if hasattr(fastf1.plotting, 'get_driver_color'):
-            return fastf1.plotting.get_driver_color(driver_code, session=None)
+            return fastf1.plotting.get_driver_color(driver_code, session=session)
         else:
             return fastf1.plotting.driver_color(driver_code)
     except:
@@ -133,12 +133,59 @@ def process_telemetry(session):
                 "Time": t_seconds,
                 "X": x,
                 "Y": y,
+                "X": x,
+                "Y": y,
                 "Distance": d, # Raw distance for interpolation
-                "Color": get_driver_color(driver),
+                "Speed": tel['Speed'].to_numpy() if 'Speed' in tel.columns else np.zeros_like(x), # Extract Speed
+                "Color": get_driver_color(driver, session=session),
                 "Team": laps.iloc[0]['Team'] if not laps.empty else "Unknown",
                 "Status": status,
-                "Laps": laps # Store laps for lap counting
+                "Laps": laps, # Store laps for lap counting
+                "PitIntervals": [] # Initialize
             }
+            
+            # Calculate Pit Intervals (Robust)
+            try:
+                # Get all valid pit times
+                pit_ins = laps['PitInTime']
+                pit_outs = laps['PitOutTime']
+                
+                # Convert to seconds (handle NaT safely)
+                raw_ins = pit_ins.dropna().dt.total_seconds().values
+                raw_outs = pit_outs.dropna().dt.total_seconds().values
+                
+                p_intervals = []
+                BUFFER = 1.0 # Reduced from 8.0 to 1.0 to avoid false positives on track
+                
+                # 1. Start from Pit Lane (Out without preceding In)
+                if len(raw_outs) > 0:
+                    first_out = raw_outs[0]
+                    # Only calculate if Out < In (or no In) AND it happens early (first 15 mins)
+                    # Otherwise it's just a normal stop where we missed the In time (rare) or a very long first stint
+                    is_early_start = (first_out - global_start_time) < 900 
+                    
+                    if (len(raw_ins) == 0 or first_out < raw_ins[0]) and is_early_start:
+                        # Driver started in pits, so from T=0 to PitOut
+                        p_intervals.append( (-10, first_out - global_start_time + BUFFER) )
+                
+                # 2. Standard Pit Stops
+                for t_in in raw_ins:
+                     start_t = t_in - global_start_time - BUFFER
+                     
+                     # Find corresponding out
+                     valid_outs = raw_outs[raw_outs > t_in]
+                     if len(valid_outs) > 0:
+                         end_t = valid_outs[0] - global_start_time + BUFFER
+                     else:
+                         # Retirement in pits
+                         end_t = start_t + 120
+                         
+                     p_intervals.append( (start_t, end_t) )
+                
+                telemetry_data[driver]["PitIntervals"] = p_intervals
+            except Exception as e:
+                print(f"Pit interval calc error {driver}: {e}")
+                telemetry_data[driver]["PitIntervals"] = []
             
             if len(t_seconds) > 0:
                 max_race_time = max(max_race_time, t_seconds[-1])
@@ -158,7 +205,7 @@ def process_telemetry(session):
             pass
 
     if not telemetry_data:
-        return None, None, None, None
+        return None, None, None, None, None, None, None, None, None, None
 
     # Create Common Timeline
     common_time = np.arange(0, max_race_time, step_size)
@@ -172,6 +219,8 @@ def process_telemetry(session):
         interp_x = np.interp(common_time, data["Time"], data["X"], left=np.nan, right=data["X"][-1])
         interp_y = np.interp(common_time, data["Time"], data["Y"], left=np.nan, right=data["Y"][-1])
         interp_d = np.interp(common_time, data["Time"], data["Distance"], left=0, right=data["Distance"][-1])
+        interp_s = np.interp(common_time, data["Time"], data["Speed"], left=0, right=0) # Interpolate Speed
+
         
         # Calculate End Time for this driver
         driver_end_time = data["Time"][-1]
@@ -204,13 +253,55 @@ def process_telemetry(session):
             "X": interp_x,
             "Y": interp_y,
             "Distance": interp_d,
+            "Speed": interp_s,
             "Color": data["Color"],
             "Team": data["Team"],
             "EndTime": driver_end_time,
             "IsDNF": is_dnf_overall,
-            "Laps": data["Laps"]
+            "Laps": data["Laps"],
+            "PitIntervals": data.get("PitIntervals", [])
         }
     
+    # 3. Build Pit Lane Path (Geometry) for Proximity Check
+    # Collect X,Y points from all drivers where they are in a known Pit Interval
+    pit_lane_points_x = []
+    pit_lane_points_y = []
+    
+    BUFFER = 1.0 # Reduced from 8.0 to 1.0 match above
+    
+    for driver, data in final_data.items():
+        intervals = data["PitIntervals"]
+        for (start_t, end_t) in intervals:
+            # STRICT MODE + SPEED FILTER
+            # Exclude buffer from time range
+            strict_start = start_t + BUFFER
+            strict_end = end_t - BUFFER
+            
+            if strict_end <= strict_start: continue
+            
+            # Find indices in common_time
+            mask = (common_time >= strict_start) & (common_time <= strict_end)
+            if np.any(mask):
+                 # Get X, Y, Speed
+                 px = data["X"][mask]
+                 py = data["Y"][mask]
+                 ps = data["Speed"][mask]
+                 
+                 # ONLY add points where Speed < 90 km/h (actual pit lane travel)
+                 # This filters out high-speed entry/exit ramps that might overlap with track
+                 speed_mask = ps < 90
+                 
+                 if np.any(speed_mask):
+                     pit_lane_points_x.extend(px[speed_mask])
+                     pit_lane_points_y.extend(py[speed_mask])
+    
+    pit_lane_path = None
+    if pit_lane_points_x:
+        # Downsample
+        pts = np.column_stack((pit_lane_points_x, pit_lane_points_y))
+        if len(pts) > 0:
+            pit_lane_path = pts[::5] # Store as numpy array
+            
     # Calculate Lap Start Times (for the Lap Counter)
     try:
         if not ref_driver:
@@ -352,7 +443,7 @@ def process_telemetry(session):
             'ST': cur_best_st
         }
 
-    return final_data, common_time, lap_start_times, lap_numbers, race_start_offset, session.weather_data, session.track_status, global_start_time, lap_sector_data
+    return final_data, common_time, lap_start_times, lap_numbers, race_start_offset, session.weather_data, session.track_status, global_start_time, lap_sector_data, pit_lane_path
 
 class RaceReplayerApp(ctk.CTk):
     def __init__(self):
@@ -487,7 +578,7 @@ class RaceReplayerApp(ctk.CTk):
             messagebox.showerror("Error", f"Could not load data for {year} {circuit}")
             return
 
-        self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, self.race_start_offset, self.weather_data, self.track_status_data, self.global_start_time, self.lap_sector_data = process_telemetry(session)
+        self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, self.race_start_offset, self.weather_data, self.track_status_data, self.global_start_time, self.lap_sector_data, self.pit_lane_path = process_telemetry(session)
         if not self.telemetry_data:
              self.status_lbl.configure(text="No Telemetry Found", text_color="red")
              return
@@ -608,12 +699,53 @@ class RaceReplayerApp(ctk.CTk):
                     dot.set_data([x], [y])
                     self.driver_labels[driver].set_position((x + 200, y + 200))
                     
-                    if is_dnf:
-                        dot.set_color("gray")
-                        self.driver_labels[driver].set_color("gray")
-                        self.driver_labels[driver].set_text(f"{driver} (DNF)")
+                    # 1. Check Pit Status (Timing + Proximity Fallback)
+                    is_pitting = False
+                    
+                    # A. Timing Interval Check
+                    if "PitIntervals" in d_data:
+                        for (p_start, p_end) in d_data["PitIntervals"]:
+                            if p_start <= current_race_time <= p_end:
+                                is_pitting = True
+                                break
+                    
+                    # B. Proximity Fallback Check (if not already detected)
+                    if not is_pitting and self.pit_lane_path is not None:
+                         # Speed threshold: 85 km/h (Strict pit limit usually 80)
+                         # Distance threshold: 10m (Separate track from pit lane)
+                         current_speed_kph = d_data["Speed"][idx]
+                         
+                         if current_speed_kph < 85:
+                             cur_x = d_data["X"][idx]
+                             cur_y = d_data["Y"][idx]
+                             
+                             diffs = self.pit_lane_path - np.array([cur_x, cur_y])
+                             dists_sq = np.sum(diffs**2, axis=1)
+                             min_dist_sq = np.min(dists_sq)
+                             
+                             if min_dist_sq < (10**2):
+                                 is_in_pit_zone = True
+                                 is_pitting = True
+
+                    dot.set_data([x], [y])
+                    self.driver_labels[driver].set_position((x + 200, y + 200))
+                    
+                    if is_pitting:
+                         label_text = f"{driver} (PIT)"
+                    elif is_dnf:
+                         label_text = f"{driver} (DNF)"
                     else:
-                        pass
+                         label_text = driver
+
+                    if is_dnf:
+                         dot.set_color("gray")
+                         self.driver_labels[driver].set_color("gray")
+                         self.driver_labels[driver].set_text(label_text)
+                    else:
+                        # Restore color
+                        dot.set_color(d_data["Color"])
+                        self.driver_labels[driver].set_color(d_data["Color"])
+                        self.driver_labels[driver].set_text(label_text)
                     
                     leaderboard_data.append((driver, dist, is_dnf))
 
