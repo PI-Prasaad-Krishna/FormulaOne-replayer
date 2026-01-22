@@ -70,6 +70,9 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.btn_lines = ctk.CTkButton(self.sidebar, text="Race Lines", command=lambda: self.show_page("race_lines"), fg_color="transparent", border_width=1)
         self.btn_lines.pack(pady=10, padx=20, fill="x")
 
+        self.btn_tyre = ctk.CTkButton(self.sidebar, text="Tyre Degradation", command=lambda: self.show_page("tyre"), fg_color="transparent", border_width=1)
+        self.btn_tyre.pack(pady=10, padx=20, fill="x")
+
         # Navigation Buttons Map
         self.nav_buttons = {
             "telemetry": self.btn_telemetry,
@@ -77,7 +80,8 @@ class AnalyticsDashboardApp(ctk.CTk):
             "track": self.btn_track,
             "dna": self.btn_dna,
             "position": self.btn_pos,
-            "race_lines": self.btn_lines
+            "race_lines": self.btn_lines,
+            "tyre": self.btn_tyre
         }
 
         # --- Main Content Area ---
@@ -111,6 +115,8 @@ class AnalyticsDashboardApp(ctk.CTk):
             self.create_position_page()
         elif page_name == "race_lines":
             self.create_race_lines_page()
+        elif page_name == "tyre":
+            self.create_tyre_page()
 
     def load_session(self, session_type='R'):
         # Helper to load session if not loaded (hardcoded 2023 Abu Dhabi for demo or add inputs)
@@ -803,9 +809,7 @@ class AnalyticsDashboardApp(ctk.CTk):
                 self.rl_is_zoomed = False
             else:
                 x, y = event.xdata, event.ydata
-                # Zoom radius: 
-                # If width is 80 (approx 8m?), then zoom radius of 600 means 60m?
-                # Let's try 600.
+                # Zoom radius
                 zoom_radius = 600 
                 self.rl_ax.set_xlim(x - zoom_radius, x + zoom_radius)
                 self.rl_ax.set_ylim(y - zoom_radius, y + zoom_radius)
@@ -814,6 +818,90 @@ class AnalyticsDashboardApp(ctk.CTk):
             self.rl_canvas.draw()
             
         fig.canvas.mpl_connect('button_press_event', on_click)
+
+    def create_tyre_page(self):
+        ctk.CTkLabel(self.content_area, text="Tyre Degradation Analysis", font=("Roboto", 24, "bold")).pack(pady=10)
+        
+        controls = ctk.CTkFrame(self.content_area)
+        controls.pack(pady=10)
+        
+        self.tyre_d1_var = ctk.StringVar(value="VER")
+        self.tyre_d2_var = ctk.StringVar(value="HAM")
+        
+        ctk.CTkEntry(controls, textvariable=self.tyre_d1_var, width=60).pack(side="left", padx=10)
+        ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
+        ctk.CTkEntry(controls, textvariable=self.tyre_d2_var, width=60).pack(side="left", padx=10)
+        
+        ctk.CTkButton(controls, text="Analyze Degradation", command=self.plot_tyre_degradation, fg_color="#E10600").pack(side="left", padx=20)
+        
+        self.tyre_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
+        self.tyre_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    def plot_tyre_degradation(self):
+        session = self.load_session()
+        if not session: return
+        
+        d1 = self.tyre_d1_var.get().upper()
+        d2 = self.tyre_d2_var.get().upper()
+        
+        try:
+            # Get laps for both drivers
+            laps_d1 = session.laps.pick_drivers(d1)
+            laps_d2 = session.laps.pick_drivers(d2)
+            
+            # Filter for quicklaps to remove in-laps/out-laps/SC
+            laps_d1 = laps_d1.pick_quicklaps(1.07)
+            laps_d2 = laps_d2.pick_quicklaps(1.07)
+            
+            # Ensure we have TyreLife
+            if 'TyreLife' not in laps_d1.columns:
+                pass 
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Data Error: {e}")
+            return
+            
+        for widget in self.tyre_frame.winfo_children(): widget.destroy()
+        
+        fig, ax = plt.subplots(figsize=(10, 8), facecolor='#121212')
+        ax.set_facecolor('#121212')
+        
+        # Plot D1
+        for stint in laps_d1['Stint'].unique():
+            stint_laps = laps_d1[laps_d1['Stint'] == stint]
+            if stint_laps.empty: continue
+            
+            compound = stint_laps['Compound'].iloc[0]
+            color = fastf1.plotting.get_driver_color(d1, session=session)
+            comp_color = fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+            
+            ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
+                       color=comp_color, marker='o', edgecolors=color, linewidth=2, s=50, label=f"{d1} {compound}")
+
+        # Plot D2
+        for stint in laps_d2['Stint'].unique():
+            stint_laps = laps_d2[laps_d2['Stint'] == stint]
+            if stint_laps.empty: continue
+            
+            compound = stint_laps['Compound'].iloc[0]
+            color = fastf1.plotting.get_driver_color(d2, session=session)
+            comp_color = fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+            
+            ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
+                       color=comp_color, marker='x', edgecolors=color, linewidth=2, s=50, label=f"{d2} {compound}")
+
+        ax.set_xlabel("Tyre Age (Laps)", color="white")
+        ax.set_ylabel("Lap Time (s)", color="white")
+        ax.tick_params(colors="white")
+        ax.set_title(f"Tyre Degradation: {d1} (o) vs {d2} (x)", color="white")
+        
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys(), facecolor='#333', labelcolor='white')
+        
+        canvas = FigureCanvasTkAgg(fig, master=self.tyre_frame)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.draw()
 
     def add_placeholder_plot(self, title):
         fig, ax = plt.subplots(figsize=(8, 5), facecolor='#121212')
