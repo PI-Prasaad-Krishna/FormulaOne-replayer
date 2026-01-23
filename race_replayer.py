@@ -155,7 +155,7 @@ def process_telemetry(session):
                 raw_outs = pit_outs.dropna().dt.total_seconds().values
                 
                 p_intervals = []
-                BUFFER = 1.0 # Reduced from 8.0 to 1.0 to avoid false positives on track
+                BUFFER = 3.0 # Increased to 3.0s to ensure coverage, reliance on timing only
                 
                 # 1. Start from Pit Lane (Out without preceding In)
                 if len(raw_outs) > 0:
@@ -304,17 +304,16 @@ def process_telemetry(session):
             
     # Calculate Lap Start Times (for the Lap Counter)
     try:
-        if not ref_driver:
-             # Look up ref_driver again if needed (should be set above)
-             max_laps = 0
-             ref_driver = drivers[0]
-             for d in drivers:
-                try:
-                    n = session.laps.pick_drivers(d)['LapNumber'].max()
-                    if n > max_laps:
-                        max_laps = n
-                        ref_driver = d
-                except: pass
+        # Identify reference driver (most laps) to validat ref_driver variable
+        max_laps = 0
+        ref_driver = drivers[0]
+        for d in drivers:
+            try:
+                n = session.laps.pick_drivers(d)['LapNumber'].max()
+                if n > max_laps:
+                    max_laps = n
+                    ref_driver = d
+            except: pass
             
         ref_laps = session.laps.pick_drivers(ref_driver)
         
@@ -335,22 +334,36 @@ def process_telemetry(session):
         lap_numbers = [1]
         
     # Calculate Race Start Offset (Jump to Lap 1)
+    # Calculate Race Start Offset via MOVEMENT DETECTION
+    # The Lap 1 Start Time metadata seems unreliable (pointing to mid-race or restart).
+    # We will find the first time any driver exceeds 10 km/h (Formation Start).
     race_start_offset = 0
     try:
-        # Check time of Lap 1 in our normalized timeline
-        # lap_start_times[0] corresponds to the earliest lap start (should be Lap 1)
-        # Note: lap_start_times is already normalized by global_start_time (min_session_time)
+        min_move_time = float('inf')
         
-        # Determine index of "Lap 1"
-        idx_l1 = np.where(lap_numbers == 1)[0]
-        if len(idx_l1) > 0:
-            # The start time of Lap 1 relative to T=0
-            # We want to skip everything before this.
-            # Clamp to 0 just in case.
-            race_start_offset = max(0, lap_start_times[idx_l1[0]])
-            print(f"Race Start Offset (Lap 1): {race_start_offset:.2f}s")
-            
-    except: pass
+        # Check a few top drivers to avoid outliers
+        check_drivers = drivers[:5] if len(drivers) > 5 else drivers
+        
+        for d in check_drivers:
+            if d in telemetry_data:
+                d_obj = telemetry_data[d]
+                # Find first index where speed > 10
+                move_idx = np.argmax(d_obj["Speed"] > 10)
+                if d_obj["Speed"][move_idx] > 10: # verify it actually found one
+                    t_move = d_obj["Time"][move_idx]
+                    if t_move < min_move_time:
+                        min_move_time = t_move
+                        
+        if min_move_time != float('inf'):
+            # Start 2 mins before movement (Formation Lap buffer)
+            race_start_offset = max(0, min_move_time - 120)
+            print(f"Detected First Movement: {min_move_time:.2f}s")
+            print(f"Race Start Offset (Movement - 120s): {race_start_offset:.2f}s")
+        else:
+            print("No movement detected, starting at 0.")
+
+    except Exception as e:
+        print(f"Movement Calc Error: {e}")
         
 
     # 2. Pre-Calculate Best Sectors & Speed Trap History per Lap
@@ -680,10 +693,14 @@ class RaceReplayerApp(ctk.CTk):
                 d_data = self.telemetry_data[driver]
                 
                 # Check for Albon issue (or any driver with missing data)
-                if idx >= len(d_data["X"]):
-                    continue # Skip if index out of bounds for this driver
+                # FIX: Instead of continue (which skips update), clamp to last frame
+                # This ensures the dot stays at the final position if data runs out slightly early
+                d_len = len(d_data["X"])
+                if d_len == 0: continue
+                
+                safe_idx = min(idx, d_len - 1)
 
-                x, y, dist = d_data["X"][idx], d_data["Y"][idx], d_data["Distance"][idx]
+                x, y, dist = d_data["X"][safe_idx], d_data["Y"][safe_idx], d_data["Distance"][safe_idx]
                 end_time = d_data.get("EndTime", 999999)
                 
                 # Determine DNF status at current frame
@@ -710,22 +727,9 @@ class RaceReplayerApp(ctk.CTk):
                                 break
                     
                     # B. Proximity Fallback Check (if not already detected)
-                    if not is_pitting and self.pit_lane_path is not None:
-                         # Speed threshold: 85 km/h (Strict pit limit usually 80)
-                         # Distance threshold: 10m (Separate track from pit lane)
-                         current_speed_kph = d_data["Speed"][idx]
-                         
-                         if current_speed_kph < 85:
-                             cur_x = d_data["X"][idx]
-                             cur_y = d_data["Y"][idx]
-                             
-                             diffs = self.pit_lane_path - np.array([cur_x, cur_y])
-                             dists_sq = np.sum(diffs**2, axis=1)
-                             min_dist_sq = np.min(dists_sq)
-                             
-                             if min_dist_sq < (10**2):
-                                 is_in_pit_zone = True
-                                 is_pitting = True
+                    # B. Proximity Fallback Check REMOVED
+                    # We rely solely on official start/end timing intervals to avoid false positives on track corners.
+                    pass
 
                     dot.set_data([x], [y])
                     self.driver_labels[driver].set_position((x + 200, y + 200))
