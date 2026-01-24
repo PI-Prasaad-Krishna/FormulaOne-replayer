@@ -753,18 +753,73 @@ class RaceReplayerApp(ctk.CTk):
                     
                     leaderboard_data.append((driver, dist, is_dnf))
 
-            # Update Lap Counter - Fixed Logic
-            lap_idx = np.searchsorted(self.lap_start_times, current_race_time, side='right') - 1
+            # Update Lap Counter - Dynamic FastF1 Logic
+            try:
+                # 1. Identify Leader (Driver with max Distance)
+                # Filter out DNFs from potential leaders to avoid stuck counters if leader retires
+                active_runners = [d for d in leaderboard_data if not d[2]] 
+                if not active_runners:
+                     active_runners = leaderboard_data # Fallback if everyone DNF (unlikely)
+
+                if active_runners:
+                    # Sort by distance descending
+                    active_runners.sort(key=lambda x: x[1], reverse=True)
+                    leader_driver = active_runners[0][0]
+                    
+                    # 2. Get Leader's Lap Data
+                    if leader_driver in self.telemetry_data:
+                        laps_df = self.telemetry_data[leader_driver]["Laps"]
+                        
+                        # 3. Find Current Lap based on Time
+                        # current_race_time is normalized (0 start). 
+                        # We need to compare with LapStartTime normalized.
+                        
+                        # We can't vectorise easily here without pre-calc, but iterating 60 rows is fine.
+                        # We look for the last lap where LapStartTime <= current_race_time
+                        
+                        current_lap_num = 1
+                        total_laps = 0
+                        
+                        if not laps_df.empty:
+                            total_laps = int(laps_df['LapNumber'].max())
+                            
+                            # Filter laps that have started
+                            # We must handle NaT or invalid times carefully
+                            valid_laps = laps_df[pd.notna(laps_df['LapStartTime'])].copy()
+                            
+                            if not valid_laps.empty:
+                                # Calculate normalized start times for comparison
+                                # NOTE: This could be optimized by pre-calculating in process_telemetry, 
+                                # but it's fast enough here.
+                                valid_laps['NormStartTime'] = valid_laps['LapStartTime'].dt.total_seconds() - self.global_start_time
+                                
+                                # Find laps started before now
+                                started_laps = valid_laps[valid_laps['NormStartTime'] <= current_race_time]
+                                
+                                if not started_laps.empty:
+                                    current_lap_num = int(started_laps.iloc[-1]['LapNumber'])
+                                else:
+                                    current_lap_num = 0 # Grid / Formation
+                        
+                        if current_lap_num == 0:
+                             self.lap_counter_text.set_text("GRID")
+                        elif current_lap_num > total_laps:
+                             self.lap_counter_text.set_text("FINISH")
+                        else:
+                             self.lap_counter_text.set_text(f"LAP {current_lap_num} / {total_laps}")
+                             
+            except Exception as e:
+                # Fallback in case of error
+                print(f"Lap Counter Error: {e}")
+                self.lap_counter_text.set_text("LAP -- / --")
             
-            if lap_idx >= 0:
-                if lap_idx < len(self.lap_numbers):
-                    current_lap_num = self.lap_numbers[lap_idx]
-                    total_laps = self.lap_numbers[-1]
-                    self.lap_counter_text.set_text(f"LAP {current_lap_num} / {total_laps}")
-                else:
-                    self.lap_counter_text.set_text("FINISH")
-            else:
-                self.lap_counter_text.set_text("GRID")
+            # DEBUG: Print Lap Number on Change
+            if 'last_logged_lap' not in self.__dict__:
+                 self.last_logged_lap = -1
+            
+            if current_lap_num != self.last_logged_lap:
+                 print(f"[DEBUG] Current Lap: {current_lap_num} / {total_laps} (Time: {current_race_time:.2f}s)")
+                 self.last_logged_lap = current_lap_num
             
             # Update Session Info (Weather & Status) - Every 1 second (approx 5 frames)
             if frame_idx % 5 == 0:
