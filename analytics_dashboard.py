@@ -152,6 +152,41 @@ class AnalyticsDashboardApp(ctk.CTk):
              print(f"Load Error: {e}")
              return None
 
+    def get_compound_color_safe(self, compound, session=None):
+        """
+        Safely retrieve compound color supporting both old (COMPOUND_COLORS) 
+        and new (get_compound_color) FastF1 versions.
+        """
+        # Try new API first
+        if hasattr(fastf1.plotting, 'get_compound_color'):
+            try:
+                return fastf1.plotting.get_compound_color(compound, session=session)
+            except:
+                pass
+        
+        # Try old API
+        if hasattr(fastf1.plotting, 'COMPOUND_COLORS'):
+             return fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+             
+        # Fallback manual map for future proofing if both fail
+        COMPOUND_MAP = {
+            "SOFT": "#da291c",
+            "MEDIUM": "#ffd12e",
+            "HARD": "#f0f0ec",
+            "INTERMEDIATE": "#43d662",
+            "WET": "#0096ff",
+            "HYPERSOFT": "#ffb3c3",
+            "ULTRASOFT": "#b148c9",
+            "SUPERSOFT": "#da291c",
+            "SOFT": "#ffd12e", # 2018? No, modern
+             # Modern Pirelli colors usually:
+             # Soft: Red, Medium: Yellow, Hard: WhiteF
+            "C1": "#f0f0ec", "C2": "#f0f0ec",
+            "C3": "#ffd12e", "C4": "#da291c", "C5": "#da291c"
+        }
+        # Actually, let's just stick to the basic names as FastF1 usually normalizes them
+        return COMPOUND_MAP.get(compound, "white")
+
     def create_telemetry_page(self):
         ctk.CTkLabel(self.content_area, text="Telemetry Battle (Head-to-Head)", font=("Roboto", 24, "bold")).pack(pady=10)
         
@@ -283,7 +318,7 @@ class AnalyticsDashboardApp(ctk.CTk):
                 length = end_lap - start_lap + 1
                 compound = stint['Compound'].iloc[0]
                 
-                color = fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+                color = self.get_compound_color_safe(compound, session=session)
                 
                 ax[1].barh(i, length, left=start_lap, color=color, edgecolor='black', height=0.8)
                 
@@ -873,7 +908,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             
             compound = stint_laps['Compound'].iloc[0]
             color = fastf1.plotting.get_driver_color(d1, session=session)
-            comp_color = fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+            comp_color = self.get_compound_color_safe(compound, session=session)
             
             ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
                        color=comp_color, marker='o', edgecolors=color, linewidth=2, s=50, label=f"{d1} {compound}")
@@ -885,10 +920,10 @@ class AnalyticsDashboardApp(ctk.CTk):
             
             compound = stint_laps['Compound'].iloc[0]
             color = fastf1.plotting.get_driver_color(d2, session=session)
-            comp_color = fastf1.plotting.COMPOUND_COLORS.get(compound, "white")
+            comp_color = self.get_compound_color_safe(compound, session=session)
             
             ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
-                       color=comp_color, marker='x', edgecolors=color, linewidth=2, s=50, label=f"{d2} {compound}")
+                       color=comp_color, marker='x', linewidth=2, s=50, label=f"{d2} {compound}")
 
         ax.set_xlabel("Tyre Age (Laps)", color="white")
         ax.set_ylabel("Lap Time (s)", color="white")
