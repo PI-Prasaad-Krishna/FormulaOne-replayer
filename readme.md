@@ -16,7 +16,7 @@ This project provides a comprehensive set of tools for F1 data analysis, accessi
 -   **Playback Control**: Pause, Resume, and adjustable speeds (1x–50x).
 -   **Live Leaderboard**: Real-time position tracking with gap intervals.
 -   **Tyre Strategy**: Visual indicator of current tyre compounds for each driver.
--   **Pit Lane Status**: Visual cues for drivers in the pit lane.
+-   **Pit Lane Status**: Visual cues for drivers in the pit lane. (working on it)
 -   **Session Info**: Displays real-time track status (SC, VSC, Red Flag) and weather conditions.
 -   **Movement Detection**: Automatically detects the race start to skip pre-race waiting times.
 
