@@ -1,50 +1,76 @@
-**F1 Visualizer Hub** 🏎️
+# F1 Visualizer Hub 🏎️
 
 An interactive Python tool suite for analyzing and visualizing Formula 1 races using telemetry from the FastF1 library.
 
-**Overview**
+## Overview
 
-This project consists of two main applications accessible via a central hub (`main.py`):
-1.  **Race Replayer**: Replays "ghost cars" to visualize the race flow.
-2.  **Analytics Dashboard**: A comprehensive suite for deep-dive analysis.
+This project provides a comprehensive set of tools for F1 data analysis, accessible via a central hub (`main.py`). It consists of two powerful applications:
 
-**Features**
+1.  **Race Replayer**: A modern race visualization tool.
+2.  **Analytics Dashboard**: A deep-dive telemetry and strategy analysis suite.
 
-### 📊 Analytics Dashboard (New!)
--   **Race Line Comparison**: Compare driver lines on a realistic track surface.
-    -   **Apex Logic**: Visualizes the track ribbon with curvature-based shifting to show drivers hitting the apex.
-    -   **Zoom Support**: Click to zoom in on corners for detailed analysis.
-    -   **Smooth Visuals**: Uses B-spline interpolation for high-quality lines.
--   **Telemetry Battle**: Head-to-head speed and throttle/brake analysis.
--   **Race Strategy**: Visualizes lap time evolution and tyre history.
--   **Track Dominance**: Speed and gear shift maps.
--   **Driver DNA**: Radar charts comparing driver performance stats.
--   **Position Chart**: Lap-by-lap position changes.
+## Features
 
-### 🏁 Race Replayer
--   Full-race replay with smooth animation.
--   Adjustable playback speed (1x–50x).
--   Handles missing telemetry (DNFs).
--   Leaderboard Improvements (On the way..probably 🤷‍♂️)
--   Current Tyre type Indicator (Working on it)
+### 🏁 Race Replayer (Modern Edition)
+-   **Full Race Animation**: Smooth 20-driver playback with interpolated positions.
+-   **Playback Control**: Pause, Resume, and adjustable speeds (1x–50x).
+-   **Live Leaderboard**: Real-time position tracking with gap intervals.
+-   **Tyre Strategy**: Visual indicator of current tyre compounds for each driver.
+-   **Pit Lane Status**: Visual cues for drivers in the pit lane.
+-   **Session Info**: Displays real-time track status (SC, VSC, Red Flag) and weather conditions.
+-   **Movement Detection**: Automatically detects the race start to skip pre-race waiting times.
 
-**Requirements**
+### 📊 Analytics Dashboard
+-   **Telemetry Battle**: Head-to-head speed and throttle/brake trace comparison.
+-   **Race Strategy**: Visualize lap time evolution and tyre history stinsts.
+-   **Race Lines**: Compare driver racing lines on a realistic track surface with apex visualization.
+-   **Tyre Degradation**: Analyze lap time drop-off vs. tyre age.
+-   **Driver DNA**: Radar charts comparing drivers on Quali Pace, Race Pace, Consistency, and Tyre Management.
+-   **Track Dominance**: Visual maps of speed and gear shifts around the circuit.
+-   **Position Chart**: Lap-by-lap position changes for the entire grid.
 
--   Python 3.8 or newer
--   Packages: `fastf1`, `matplotlib`, `pandas`, `customtkinter`, `scipy`
+## Installation
 
-Install requirements:
+### 1. Requirements
+Ensure you have Python 3.8+ installed.
+
+### 2. Install Dependencies
+Install the required Python packages using pip:
+
 ```bash
-pip install fastf1 matplotlib pandas customtkinter scipy
+pip install fastf1 customtkinter matplotlib pandas scipy numpy
 ```
 
-**Quick Start**
+### 3. Setup
+Clone the repository or download the source code:
 
-1.  Run the main hub:
 ```bash
-python main.py
+git clone <repository-url>
+cd "F1 Visulaizer"
 ```
-2.  Select **Race Replayer** or **Analytics Dashboard**.
 
-**Acknowledgments**
-Thanks to FastF1 and Matplotlib. Not affiliated with Formula 1.
+> **Note**: On first run, a `f1_cache` directory will be created to store downloaded telemetry data.
+
+## Quick Start
+
+1.  Launch the main hub:
+    ```bash
+    python main.py
+    ```
+2.  Select your desired tool:
+    -   Click **RACE REPLAYER** to watch a race unfold.
+    -   Click **ANALYTICS DASHBOARD** to dive into data.
+
+3.  **In the Apps**:
+    -   Enter the **Year** (e.g., `2023`) and **Circuit** (e.g., `Abu Dhabi`).
+    -   For comparisons, enter driver abbreviations (e.g., `VER` vs `HAM`).
+
+## Troubleshooting
+
+-   **High DPI Displays**: If the window looks too small or text is blurry, check your OS display scaling settings. CustomTkinter generally handles scaling well.
+-   **Slow Loading**: First-time data loading for a race can take a minute as `fastf1` downloads and caches large telemetry files. Subsequent loads will be much faster.
+-   **Missing Data**: Some older races or practice sessions might have incomplete telemetry.
+
+## Acknowledgments
+Powered by [FastF1](https://github.com/theOehrly/Fast-F1)
+Not affiliated with Formula 1.
