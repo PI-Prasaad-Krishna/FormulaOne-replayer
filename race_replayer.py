@@ -673,8 +673,12 @@ class RaceReplayerApp(ctk.CTk):
         else:
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
-        self.lap_counter_text = self.ax.text2D(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
-                                            color='white', fontsize=18, fontweight='bold')
+        if use_3d:
+            self.lap_counter_text = self.ax.text2D(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
+                                                color='white', fontsize=18, fontweight='bold')
+        else:
+            self.lap_counter_text = self.ax.text(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
+                                                color='white', fontsize=18, fontweight='bold')
 
         self.driver_dots = {}
         self.driver_labels = {}
