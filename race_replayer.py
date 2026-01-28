@@ -135,8 +135,13 @@ def process_telemetry(session):
                 "Y": y,
                 "X": x,
                 "Y": y,
+                "Z": tel['Z'].to_numpy() if 'Z' in tel.columns else np.zeros_like(x), # Extract Z (Elevation)
                 "Distance": d, # Raw distance for interpolation
-                "Speed": tel['Speed'].to_numpy() if 'Speed' in tel.columns else np.zeros_like(x), # Extract Speed
+                "Speed": tel['Speed'].to_numpy() if 'Speed' in tel.columns else np.zeros_like(x),
+                "RPM": tel['RPM'].to_numpy() if 'RPM' in tel.columns else np.zeros_like(x),
+                "Gear": tel['nGear'].to_numpy() if 'nGear' in tel.columns else np.zeros_like(x),
+                "Throttle": tel['Throttle'].to_numpy() if 'Throttle' in tel.columns else np.zeros_like(x),
+                "Brake": tel['Brake'].to_numpy() if 'Brake' in tel.columns else np.zeros_like(x),
                 "Color": get_driver_color(driver, session=session),
                 "Team": laps.iloc[0]['Team'] if not laps.empty else "Unknown",
                 "Status": status,
@@ -218,8 +223,13 @@ def process_telemetry(session):
         
         interp_x = np.interp(common_time, data["Time"], data["X"], left=np.nan, right=data["X"][-1])
         interp_y = np.interp(common_time, data["Time"], data["Y"], left=np.nan, right=data["Y"][-1])
+        interp_z = np.interp(common_time, data["Time"], data["Z"], left=np.nan, right=data["Z"][-1])
         interp_d = np.interp(common_time, data["Time"], data["Distance"], left=0, right=data["Distance"][-1])
-        interp_s = np.interp(common_time, data["Time"], data["Speed"], left=0, right=0) # Interpolate Speed
+        interp_s = np.interp(common_time, data["Time"], data["Speed"], left=0, right=0) 
+        interp_rpm = np.interp(common_time, data["Time"], data["RPM"], left=0, right=0)
+        interp_gear = np.interp(common_time, data["Time"], data["Gear"], left=0, right=0)
+        interp_thr = np.interp(common_time, data["Time"], data["Throttle"], left=0, right=0)
+        interp_brk = np.interp(common_time, data["Time"], data["Brake"], left=0, right=0)
 
         
         # Calculate End Time for this driver
@@ -252,8 +262,13 @@ def process_telemetry(session):
         final_data[driver] = {
             "X": interp_x,
             "Y": interp_y,
+            "Z": interp_z,
             "Distance": interp_d,
             "Speed": interp_s,
+            "RPM": interp_rpm,
+            "Gear": interp_gear,
+            "Throttle": interp_thr,
+            "Brake": interp_brk,
             "Color": data["Color"],
             "Team": data["Team"],
             "EndTime": driver_end_time,
@@ -499,6 +514,11 @@ class RaceReplayerApp(ctk.CTk):
         
         self.status_lbl = ctk.CTkLabel(self.control_frame, text="Ready", text_color="gray")
         self.status_lbl.pack(side="left", padx=20)
+        
+        # 3D Toggle Switch
+        self.is_3d_mode = ctk.BooleanVar(value=False)
+        self.switch_3d = ctk.CTkSwitch(self.control_frame, text="3D MAP", variable=self.is_3d_mode, command=self.toggle_3d_mode, progress_color="#E10600")
+        self.switch_3d.pack(side="left", padx=20)
 
         # -- 1.1 Session Info Panel (Weather & Status) --
         self.session_info_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
@@ -564,6 +584,7 @@ class RaceReplayerApp(ctk.CTk):
         self.driver_dots = {}
         self.driver_labels = {}
         self.lap_counter_text = None
+        self.hud_elements = {} # Store HUD artists
         self.current_frame = 0
 
     def on_close(self):
@@ -582,7 +603,13 @@ class RaceReplayerApp(ctk.CTk):
             messagebox.showerror("Input Error", "Year must be a number.")
             return
         
+            return
+        
         self.status_lbl.configure(text="Loading Data... (Please Wait)", text_color="orange")
+        # Reset Animation Toggle if needed
+        if self.anim: 
+             try: self.anim.event_source.stop()
+             except: pass
         self.update()
         
         session = load_race_data(year, circuit, "R")
@@ -603,37 +630,134 @@ class RaceReplayerApp(ctk.CTk):
         self.is_finished = False
         self.status_lbl.configure(text=f"Replaying: {year} {circuit}", text_color="#2CC985")
 
+                                    
+    def toggle_3d_mode(self):
+        # Restart plot with new mode if data exists
+        if self.telemetry_data:
+            self.setup_plot()
+            if not self.is_paused and not self.is_finished:
+                 self.start_animation(start_frame=self.current_frame)
+            else:
+                 # Just redraw current frame static
+                 pass
+
     def setup_plot(self):
-        self.ax.clear()
-        self.ax.axis('off')
+        # safely clear
+        self.fig.clf() # Clear figure to reset axes (important for 2D vs 3D)
+        
+        # Check Mode
+        use_3d = self.is_3d_mode.get()
+        
+        if use_3d:
+            self.ax = self.fig.add_subplot(111, projection='3d')
+            self.ax.set_facecolor('#121212')
+            # Pane colors
+            self.ax.xaxis.set_pane_color((0.1, 0.1, 0.1, 1.0))
+            self.ax.yaxis.set_pane_color((0.1, 0.1, 0.1, 1.0))
+            self.ax.zaxis.set_pane_color((0.1, 0.1, 0.1, 1.0))
+            self.ax.grid(False)
+        else:
+            self.ax = self.fig.add_subplot(111)
+            self.ax.axis('off')
+            self.ax.set_facecolor('#121212')
         
         ref_driver = list(self.telemetry_data.keys())[0]
         ref_x = self.telemetry_data[ref_driver]["X"]
         ref_y = self.telemetry_data[ref_driver]["Y"]
+        ref_z = self.telemetry_data[ref_driver]["Z"]
         
         mask = ~np.isnan(ref_x)
-        self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
-        self.lap_counter_text = self.ax.text(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
+        if use_3d:
+             self.ax.plot(ref_x[mask], ref_y[mask], ref_z[mask], color='#333333', linewidth=4, alpha=0.5)
+        else:
+             self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
+        
+        self.lap_counter_text = self.ax.text2D(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
                                             color='white', fontsize=18, fontweight='bold')
 
         self.driver_dots = {}
         self.driver_labels = {}
+        self.hud_elements = {} 
         
         for driver, data in self.telemetry_data.items():
             color = data["Color"]
-            dot, = self.ax.plot([], [], marker='o', color=color, markersize=8, markeredgecolor='black', markeredgewidth=1)
+            if use_3d:
+                 # 3D Plot
+                 dot, = self.ax.plot([], [], [], marker='o', color=color, markersize=6, markeredgecolor='black', markeredgewidth=1)
+            else:
+                 dot, = self.ax.plot([], [], marker='o', color=color, markersize=8, markeredgecolor='black', markeredgewidth=1)
+            
             self.driver_dots[driver] = dot
             
-            text = self.ax.text(0, 0, driver, color=color, fontsize=9, fontweight='bold', clip_on=True, 
+            # Text in 3D is tricky, we use common text() which works but depth is weird. 
+            # Or text2D for overlay? Let's use world coordinates text.
+            if use_3d:
+                 text = self.ax.text(0, 0, 0, driver, color=color, fontsize=8, fontweight='bold')
+            else:
+                 text = self.ax.text(0, 0, driver, color=color, fontsize=9, fontweight='bold', clip_on=True, 
                                 bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', pad=1))
             self.driver_labels[driver] = text
-            
+        
+        # --- HUD SETUP (Same for both, uses Axes Transform) ---
+        
+        # Helper for text
+        def add_text(x, y, s, **kwargs):
+            if use_3d:
+                return self.ax.text2D(x, y, s, transform=self.ax.transAxes, **kwargs)
+            else:
+                return self.ax.text(x, y, s, transform=self.ax.transAxes, **kwargs)
+
+        # Speed & Gear Group
+        self.hud_speed = add_text(0.92, 0.12, "0", color='white', fontsize=24, fontweight='bold', ha='right')
+        self.hud_unit = add_text(0.93, 0.12, "km/h", color='gray', fontsize=10, ha='left')
+        
+        self.hud_gear = add_text(0.82, 0.12, "N", color='#00ff00', fontsize=24, fontweight='bold', ha='center')
+        
+        # RPM
+        self.hud_rpm = add_text(0.875, 0.02, "RPM: 0", color='white', fontsize=8, ha='center')
+        
+        # Driver Name Label for HUD
+        self.hud_driver = add_text(0.875, 0.17, "LEADER", color='white', fontsize=10, fontweight='bold', ha='center',
+                                      bbox=dict(facecolor='black', alpha=0.3, pad=2, edgecolor='none'))
+
+         # Bars (Patches) - NOTE: patches can be added to 3D axes but they are 2D objects in 3D space usually.
+         # For 3D axes, standard 2D patches/rectangles in transAxes MIGHT NOT SHOW UP depending on backend.
+         # TkAgg usually handles it.
+        
+        # Throttle Bar Background
+        # We assume 2D overlay works. If not, we might lose bars in 3D mode.
+        if not use_3d:
+             # Full HUD in 2D
+             self.ax.add_patch(plt.Rectangle((0.80, 0.08), 0.15, 0.02, transform=self.ax.transAxes, color='#333333'))
+             self.hud_thr_bar = plt.Rectangle((0.80, 0.08), 0.0, 0.02, transform=self.ax.transAxes, color='#2CC985')
+             self.ax.add_patch(self.hud_thr_bar)
+             
+             self.ax.add_patch(plt.Rectangle((0.80, 0.05), 0.15, 0.02, transform=self.ax.transAxes, color='#333333'))
+             self.hud_brk_bar = plt.Rectangle((0.80, 0.05), 0.0, 0.02, transform=self.ax.transAxes, color='#E10600')
+             self.ax.add_patch(self.hud_brk_bar)
+        else:
+             # Minimal HUD in 3D (Text only) or try to force it. 
+             # Matplotlib 3D doesn't support add_patch with transAxes easily. 
+             # We will skip bars in 3D for stability.
+             self.hud_thr_bar = None
+             self.hud_brk_bar = None
+
         valid_x = ref_x[mask]
         valid_y = ref_y[mask]
-        self.ax.set_xlim(np.min(valid_x) - 1000, np.max(valid_x) + 1000)
-        self.ax.set_ylim(np.min(valid_y) - 1000, np.max(valid_y) + 1000)
-        self.ax.set_aspect('equal')
+        valid_z = ref_z[mask]
+        
+        self.ax.set_xlim(np.min(valid_x) - 500, np.max(valid_x) + 500)
+        self.ax.set_ylim(np.min(valid_y) - 500, np.max(valid_y) + 500)
+        
+        if use_3d:
+             self.ax.set_zlim(np.min(valid_z) - 50, np.max(valid_z) + 50)
+             # Set view
+             self.ax.view_init(elev=30, azim=-60)
+             self.ax.set_box_aspect((1, 1, 0.2)) # Flatter Z
+        else:
+             self.ax.set_aspect('equal')
+             
         self.canvas.draw()
 
     def change_speed(self, choice):
@@ -700,7 +824,7 @@ class RaceReplayerApp(ctk.CTk):
                 
                 safe_idx = min(idx, d_len - 1)
 
-                x, y, dist = d_data["X"][safe_idx], d_data["Y"][safe_idx], d_data["Distance"][safe_idx]
+                x, y, z, dist = d_data["X"][safe_idx], d_data["Y"][safe_idx], d_data["Z"][safe_idx], d_data["Distance"][safe_idx]
                 end_time = d_data.get("EndTime", 999999)
                 
                 # Determine DNF status at current frame
@@ -713,8 +837,15 @@ class RaceReplayerApp(ctk.CTk):
                 else:
                     dot.set_visible(True)
                     self.driver_labels[driver].set_visible(True)
-                    dot.set_data([x], [y])
-                    self.driver_labels[driver].set_position((x + 200, y + 200))
+                    
+                    if self.is_3d_mode.get():
+                        dot.set_data([x], [y])
+                        dot.set_3d_properties([z])
+                        self.driver_labels[driver].set_position((x, y))
+                        self.driver_labels[driver].set_3d_properties(z)
+                    else:
+                        dot.set_data([x], [y])
+                        self.driver_labels[driver].set_position((x + 200, y + 200))
                     
                     # 1. Check Pit Status (Timing + Proximity Fallback)
                     is_pitting = False
@@ -799,19 +930,54 @@ class RaceReplayerApp(ctk.CTk):
                                 if not started_laps.empty:
                                     current_lap_num = int(started_laps.iloc[-1]['LapNumber'])
                                 else:
-                                    current_lap_num = 0 # Grid / Formation
-                        
+                                    current_lap_num = 0
+
                         if current_lap_num == 0:
-                             self.lap_counter_text.set_text("GRID")
+                            self.lap_counter_text.set_text("GRID")
                         elif current_lap_num > total_laps:
-                             self.lap_counter_text.set_text("FINISH")
+                            self.lap_counter_text.set_text("FINISH")
                         else:
-                             self.lap_counter_text.set_text(f"LAP {current_lap_num} / {total_laps}")
-                             
+                            self.lap_counter_text.set_text(f"Lap {current_lap_num} / {total_laps}")
+                    
+                    # --- HUD UPDATE ---
+                    # Update HUD with Leader's Telemetry
+                    # (In future we can add a 'Selected Driver' for this)
+                    if leader_driver in self.telemetry_data:
+                        l_data = self.telemetry_data[leader_driver]
+                        # Safe Index Check
+                        l_len = len(l_data["X"])
+                        l_idx = min(idx, l_len - 1)
+                        
+                        # Speed
+                        speed_val = l_data["Speed"][l_idx]
+                        self.hud_speed.set_text(f"{int(speed_val)}")
+                        
+                        # Gear
+                        gear_val = int(round(l_data["Gear"][l_idx]))
+                        self.hud_gear.set_text(str(gear_val) if gear_val > 0 else "N")
+                        self.hud_gear.set_color(l_data["Color"]) # Match driver color
+                        
+                        # RPM
+                        rpm_val = int(l_data["RPM"][l_idx])
+                        self.hud_rpm.set_text(f"{rpm_val} RPM")
+                        
+                        # Throttle (0-100)
+                        if self.hud_thr_bar:
+                            thr_val = l_data["Throttle"][l_idx]
+                            self.hud_thr_bar.set_width(0.15 * (thr_val / 100.0))
+                        
+                        # Brake (0-100 or bool)
+                        if self.hud_brk_bar:
+                            brk_val = l_data["Brake"][l_idx]
+                            if brk_val <= 1.05: brk_val *= 100.0 
+                            self.hud_brk_bar.set_width(0.15 * (brk_val / 100.0))
+                        
+                        self.hud_driver.set_text(f"{leader_driver} (LEADER)")
+                        self.hud_driver.set_color(l_data["Color"])
+
             except Exception as e:
-                # Fallback in case of error
-                print(f"Lap Counter Error: {e}")
-                self.lap_counter_text.set_text("LAP -- / --")
+                print(f"Update Error: {e}")
+                pass
             
             # DEBUG: Print Lap Number on Change
             if 'last_logged_lap' not in self.__dict__:
