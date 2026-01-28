@@ -587,6 +587,60 @@ class RaceReplayerApp(ctk.CTk):
         self.hud_elements = {} # Store HUD artists
         self.current_frame = 0
 
+        # Bind scroll event for 3D zoom
+        self.canvas.mpl_connect('scroll_event', self.on_scroll)
+
+    def on_scroll(self, event):
+        """ Zoom in/out with scroll wheel in 3D mode by adjusting axis limits """
+        if not self.is_3d_mode.get():
+            return
+            
+        if event.inaxes != self.ax:
+            return
+
+        # Zoom Factor logic
+        # < 1.0 = Zoom In (Smaller View)
+        # > 1.0 = Zoom Out (Larger View)
+        zoom_step = 0.1
+        
+        if event.button == 'up':
+            # Zoom In
+            self.zoom_level = max(0.1, self.zoom_level - zoom_step)
+        elif event.button == 'down':
+            # Zoom Out
+            self.zoom_level = min(5.0, self.zoom_level + zoom_step)
+        else:
+            return
+            
+        self.apply_zoom()
+        self.canvas.draw_idle()
+
+    def apply_zoom(self):
+        """ Apply current zoom level to axis limits """
+        if not hasattr(self, 'plot_bounds'):
+            return
+            
+        (min_x, max_x, min_y, max_y, min_z, max_z) = self.plot_bounds
+        
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        
+        span_x = (max_x - min_x)
+        span_y = (max_y - min_y)
+        
+        # Apply Zoom
+        new_span_x = span_x * self.zoom_level
+        new_span_y = span_y * self.zoom_level
+        
+        self.ax.set_xlim(center_x - new_span_x/2, center_x + new_span_x/2)
+        self.ax.set_ylim(center_y - new_span_y/2, center_y + new_span_y/2)
+        
+        # Optionally zoom Z or keep it fixed? 
+        # Usually for track maps we just zoom X/Y. 
+        # But if we zoom in a lot, Z might need adjustment if we are looking at elevation changes.
+        # Let's keep Z fixed for now or maybe zoom it less aggressively.
+        # self.ax.set_zlim(...) 
+
     def on_close(self):
         if self.anim:
             try: self.anim.event_source.stop()
@@ -751,17 +805,23 @@ class RaceReplayerApp(ctk.CTk):
         valid_y = ref_y[mask]
         valid_z = ref_z[mask]
         
-        self.ax.set_xlim(np.min(valid_x) - 500, np.max(valid_x) + 500)
-        self.ax.set_ylim(np.min(valid_y) - 500, np.max(valid_y) + 500)
+        # Store bounds for zooming
+        min_x, max_x = np.min(valid_x) - 500, np.max(valid_x) + 500
+        min_y, max_y = np.min(valid_y) - 500, np.max(valid_y) + 500
+        min_z, max_z = np.min(valid_z) - 50, np.max(valid_z) + 50
+        
+        self.plot_bounds = (min_x, max_x, min_y, max_y, min_z, max_z)
+        self.zoom_level = 1.0
         
         if use_3d:
-             self.ax.set_zlim(np.min(valid_z) - 50, np.max(valid_z) + 50)
+             self.ax.set_zlim(min_z, max_z)
              # Set view
              self.ax.view_init(elev=30, azim=-60)
              self.ax.set_box_aspect((1, 1, 0.2)) # Flatter Z
         else:
              self.ax.set_aspect('equal')
              
+        self.apply_zoom()
         self.canvas.draw()
 
     def change_speed(self, choice):
