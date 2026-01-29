@@ -34,6 +34,9 @@ class AnalyticsDashboardApp(ctk.CTk):
         # Grid Layout
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.is_running = True
 
         # --- Sidebar ---
         self.sidebar = ctk.CTkFrame(self, width=250, corner_radius=0)
@@ -204,6 +207,8 @@ class AnalyticsDashboardApp(ctk.CTk):
         ctk.CTkEntry(controls, textvariable=self.d2_var, width=60).pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Fastest Lap", command=self.plot_telemetry, fg_color="#E10600").pack(side="left", padx=20)
+        self.btn_play = ctk.CTkButton(controls, text="Play Replay", command=self.toggle_telemetry_animation, fg_color="#333", width=100, state="disabled")
+        self.btn_play.pack(side="left", padx=10)
         
         self.telemetry_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.telemetry_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -233,6 +238,10 @@ class AnalyticsDashboardApp(ctk.CTk):
             
             c1 = fastf1.plotting.get_driver_color(d1, session=session)
             c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            
+            # Enable play button
+            self.btn_play.configure(state="normal", fg_color="#333")
+            
         except Exception as e:
             messagebox.showerror("Error", f"Analysis error: {e}")
             return
@@ -281,62 +290,85 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.marker_d1, = self.ax_track.plot([], [], 'o', color='white', markersize=8, markeredgecolor=c1, markeredgewidth=2)
         self.marker_d2, = self.ax_track.plot([], [], 'o', color='white', markersize=8, markeredgecolor=c2, markeredgewidth=2)
         
-        canvas = FigureCanvasTkAgg(fig, master=self.telemetry_frame)
-        canvas.get_tk_widget().pack(fill="both", expand=True)
-        canvas.draw()
+        self.tel_canvas = FigureCanvasTkAgg(fig, master=self.telemetry_frame)
+        self.tel_canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.tel_canvas.draw()
         
         # Connect Hover Event
-        canvas.mpl_connect('motion_notify_event', self.on_hover_telemetry)
+        # Connect Hover Event
+        self.tel_canvas.mpl_connect('motion_notify_event', self.on_hover_telemetry)
+
+    def toggle_telemetry_animation(self):
+        if hasattr(self, 'anim_running') and self.anim_running:
+            self.anim_running = False
+            self.btn_play.configure(text="Play Replay")
+        else:
+            self.anim_running = True
+            self.btn_play.configure(text="Pause Replay")
+            self.animate_telemetry()
+
+    def animate_telemetry(self):
+        if not hasattr(self, 'anim_running') or not self.anim_running: return
+        if not getattr(self, 'is_running', True): return # Stop if window closed
+        
+        # Determine max distance
+        max_dist = self.tel_d1['Distance'].max()
+        
+        # Current distance state
+        if not hasattr(self, 'current_dist'):
+            self.current_dist = 0
+            
+        step = 20 # Meters per frame (adjust for speed)
+        
+        self.current_dist += step
+        if self.current_dist > max_dist:
+            self.current_dist = 0 # Loop or stop? Let's loop
+            
+        self.update_telemetry_cursor(self.current_dist)
+        
+        # Schedule next frame (50ms = 20fps)
+        self.after(50, self.animate_telemetry)
+
+    def update_telemetry_cursor(self, dist):
+        if not hasattr(self, 'cursor_speed'): return
+        
+        # Update Cursors
+        self.cursor_speed.set_xdata([dist])
+        self.cursor_throt.set_xdata([dist])
+        
+        try:
+             # D1
+            idx1 = (np.abs(self.tel_d1_pos['Distance'] - dist)).argmin()
+            x1, y1 = self.tel_d1_pos['X'].iloc[idx1], self.tel_d1_pos['Y'].iloc[idx1]
+            self.marker_d1.set_data([x1], [y1])
+            
+            # D2
+            idx2 = (np.abs(self.tel_d2_pos['Distance'] - dist)).argmin()
+            x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
+            self.marker_d2.set_data([x2], [y2])
+            
+            self.tel_canvas.draw_idle()
+        except: pass
 
     def on_hover_telemetry(self, event):
         if event.inaxes in [self.ax_speed, self.ax_throt]:
-            # Mouse over traces -> update track
             dist = event.xdata
             if dist is None: return
-            
-            # Update Cursors
-            self.cursor_speed.set_xdata([dist])
-            self.cursor_throt.set_xdata([dist])
-            
-            # Find Track Pos
-            try:
-                # D1
-                idx1 = (np.abs(self.tel_d1_pos['Distance'] - dist)).argmin()
-                x1, y1 = self.tel_d1_pos['X'].iloc[idx1], self.tel_d1_pos['Y'].iloc[idx1]
-                self.marker_d1.set_data([x1], [y1])
-                
-                # D2
-                idx2 = (np.abs(self.tel_d2_pos['Distance'] - dist)).argmin()
-                x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
-                self.marker_d2.set_data([x2], [y2])
-                
-                event.canvas.draw_idle()
-            except: pass
+            self.anim_running = False # Stop animation if user interacts
+            self.btn_play.configure(text="Play Replay")
+            self.update_telemetry_cursor(dist)
             
         elif event.inaxes == self.ax_track:
-            # Mouse over track -> update traces
             mx, my = event.xdata, event.ydata
             if mx is None: return
+            self.anim_running = False
+            self.btn_play.configure(text="Play Replay")
             
-            # Find closest distance on D1 track
             try:
                 dists = np.sqrt((self.tel_d1_pos['X'] - mx)**2 + (self.tel_d1_pos['Y'] - my)**2)
                 idx = dists.argmin()
                 found_dist = self.tel_d1_pos['Distance'].iloc[idx]
-                
-                self.cursor_speed.set_xdata([found_dist])
-                self.cursor_throt.set_xdata([found_dist])
-                
-                # Update Markers
-                x1, y1 = self.tel_d1_pos['X'].iloc[idx], self.tel_d1_pos['Y'].iloc[idx]
-                self.marker_d1.set_data([x1], [y1])
-                
-                # Sync D2
-                idx2 = (np.abs(self.tel_d2_pos['Distance'] - found_dist)).argmin()
-                x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
-                self.marker_d2.set_data([x2], [y2])
-                
-                event.canvas.draw_idle()
+                self.update_telemetry_cursor(found_dist)
             except: pass
 
     def create_strategy_page(self):
@@ -1032,6 +1064,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=20)
         canvas.draw()
 
+    def on_closing(self):
+        self.is_running = False
+        if hasattr(self, 'anim_running'):
+            self.anim_running = False
+        self.quit()
+        self.destroy()
+        sys.exit()
+
 if __name__ == "__main__":
+    import sys
     app = AnalyticsDashboardApp()
     app.mainloop()
