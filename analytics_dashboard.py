@@ -229,12 +229,13 @@ class AnalyticsDashboardApp(ctk.CTk):
                 messagebox.showerror("Error", "Data not available for one or both drivers.")
                 return
 
-            self.tel_d1 = laps_d1.get_car_data().add_distance()
-            self.tel_d2 = laps_d2.get_car_data().add_distance()
+            # Unified Data Source (Video/Position/Car Data merged)
+            self.tel_d1 = laps_d1.get_telemetry().add_distance()
+            self.tel_d2 = laps_d2.get_telemetry().add_distance()
             
-            # Position Data for Track Map
-            self.tel_d1_pos = laps_d1.get_telemetry().add_distance()
-            self.tel_d2_pos = laps_d2.get_telemetry().add_distance()
+            # Position Data is now same as Telemetry Data
+            self.tel_d1_pos = self.tel_d1
+            self.tel_d2_pos = self.tel_d2
             
             c1 = fastf1.plotting.get_driver_color(d1, session=session)
             c2 = fastf1.plotting.get_driver_color(d2, session=session)
@@ -263,6 +264,12 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.ax_speed.grid(True, linestyle='--', alpha=0.2)
         self.ax_speed.legend(facecolor='#333', labelcolor='white')
         self.ax_speed.set_title(f"Telemetry: {d1} vs {d2}", color="white")
+        
+        # HUD Text (Top Right of Speed Plot)
+        self.hud_text_d1 = self.ax_speed.text(0.98, 0.9, f"{d1}: 0 km/h", transform=self.ax_speed.transAxes, 
+                                            color=c1, ha='right', fontweight='bold', fontsize=10)
+        self.hud_text_d2 = self.ax_speed.text(0.98, 0.8, f"{d2}: 0 km/h", transform=self.ax_speed.transAxes, 
+                                            color=c2, ha='right', fontweight='bold', fontsize=10)
         
         # Throttle Trace (Bottom Left)
         self.ax_throt = fig.add_subplot(gs[1, 0], sharex=self.ax_speed)
@@ -337,15 +344,25 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.cursor_throt.set_xdata([dist])
         
         try:
-             # D1
+            # D1
             idx1 = (np.abs(self.tel_d1_pos['Distance'] - dist)).argmin()
             x1, y1 = self.tel_d1_pos['X'].iloc[idx1], self.tel_d1_pos['Y'].iloc[idx1]
             self.marker_d1.set_data([x1], [y1])
+            
+            # Update HUD D1
+            s1 = self.tel_d1['Speed'].iloc[idx1]
+            t1 = self.tel_d1['Throttle'].iloc[idx1]
+            self.hud_text_d1.set_text(f"{self.d1_var.get().upper()}: {s1:.0f} km/h | {t1:.0f}%")
             
             # D2
             idx2 = (np.abs(self.tel_d2_pos['Distance'] - dist)).argmin()
             x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
             self.marker_d2.set_data([x2], [y2])
+            
+            # Update HUD D2
+            s2 = self.tel_d2['Speed'].iloc[idx2]
+            t2 = self.tel_d2['Throttle'].iloc[idx2]
+            self.hud_text_d2.set_text(f"{self.d2_var.get().upper()}: {s2:.0f} km/h | {t2:.0f}%")
             
             self.tel_canvas.draw_idle()
         except: pass
