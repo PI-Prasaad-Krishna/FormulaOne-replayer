@@ -188,7 +188,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         return COMPOUND_MAP.get(compound, "white")
 
     def create_telemetry_page(self):
-        ctk.CTkLabel(self.content_area, text="Telemetry Battle (Head-to-Head)", font=("Roboto", 24, "bold")).pack(pady=10)
+        ctk.CTkLabel(self.content_area, text="Interactive Telemetry Battle", font=("Roboto", 24, "bold")).pack(pady=10)
         
         controls = ctk.CTkFrame(self.content_area)
         controls.pack(pady=10)
@@ -216,45 +216,128 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.d1_var.get().upper()
         d2 = self.d2_var.get().upper()
         
-        laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
-        laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
-        
-        tel_d1 = laps_d1.get_car_data().add_distance()
-        tel_d2 = laps_d2.get_car_data().add_distance()
-        
-        c1 = fastf1.plotting.get_driver_color(d1, session=session)
-        c2 = fastf1.plotting.get_driver_color(d2, session=session)
+        try:
+            laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
+            laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
+            
+            if laps_d1 is None or laps_d2 is None:
+                messagebox.showerror("Error", "Data not available for one or both drivers.")
+                return
+
+            self.tel_d1 = laps_d1.get_car_data().add_distance()
+            self.tel_d2 = laps_d2.get_car_data().add_distance()
+            
+            # Position Data for Track Map
+            self.tel_d1_pos = laps_d1.get_telemetry().add_distance()
+            self.tel_d2_pos = laps_d2.get_telemetry().add_distance()
+            
+            c1 = fastf1.plotting.get_driver_color(d1, session=session)
+            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+        except Exception as e:
+            messagebox.showerror("Error", f"Analysis error: {e}")
+            return
         
         # Plot
         for widget in self.telemetry_frame.winfo_children(): widget.destroy()
         
-        fig, ax = plt.subplots(2, 1, figsize=(10, 8), sharex=True, facecolor='#121212')
+        # Grid Layout for Plots: Left (Traces), Right (Track)
+        fig = plt.figure(figsize=(12, 8), facecolor='#121212')
+        gs = fig.add_gridspec(2, 2, height_ratios=[1, 1], width_ratios=[2, 1])
         
-        # Speed
-        ax[0].set_facecolor('#121212')
-        ax[0].plot(tel_d1['Distance'], tel_d1['Speed'], color=c1, label=d1)
-        ax[0].plot(tel_d2['Distance'], tel_d2['Speed'], color=c2, label=d2)
-        ax[0].set_ylabel("Speed (km/h)", color="white")
-        ax[0].tick_params(colors="white")
-        ax[0].legend()
-        ax[0].set_title(f"Speed Trace: {d1} vs {d2}", color="white")
+        # Speed Trace (Top Left)
+        self.ax_speed = fig.add_subplot(gs[0, 0])
+        self.ax_speed.set_facecolor('#121212')
+        self.ax_speed.plot(self.tel_d1['Distance'], self.tel_d1['Speed'], color=c1, label=d1)
+        self.ax_speed.plot(self.tel_d2['Distance'], self.tel_d2['Speed'], color=c2, label=d2)
+        self.ax_speed.set_ylabel("Speed (km/h)", color="white")
+        self.ax_speed.tick_params(colors="white", labelbottom=False)
+        self.ax_speed.grid(True, linestyle='--', alpha=0.2)
+        self.ax_speed.legend(facecolor='#333', labelcolor='white')
+        self.ax_speed.set_title(f"Telemetry: {d1} vs {d2}", color="white")
         
-        # Throttle/Brake
-        ax[1].set_facecolor('#121212')
-        ax[1].plot(tel_d1['Distance'], tel_d1['Throttle'], color=c1, linestyle="--", label=f"{d1} Throttle")
-        ax[1].plot(tel_d2['Distance'], tel_d2['Throttle'], color=c2, linestyle="--", label=f"{d2} Throttle")
+        # Throttle Trace (Bottom Left)
+        self.ax_throt = fig.add_subplot(gs[1, 0], sharex=self.ax_speed)
+        self.ax_throt.set_facecolor('#121212')
+        self.ax_throt.plot(self.tel_d1['Distance'], self.tel_d1['Throttle'], color=c1, linestyle="--")
+        self.ax_throt.plot(self.tel_d2['Distance'], self.tel_d2['Throttle'], color=c2, linestyle="--")
+        self.ax_throt.set_ylabel("Throttle %", color="white")
+        self.ax_throt.set_xlabel("Distance (m)", color="white")
+        self.ax_throt.tick_params(colors="white")
+        self.ax_throt.grid(True, linestyle='--', alpha=0.2)
         
-        # Overlay Brake? or separate? Let's just do Throttle for clarity or Brake as negative?
-        # Requirement: "Throttle & Brake Inputs"
-        # Let's add Brake on twin axis if possible, or just plot brake as well.
+        # Track Map (Right Column)
+        self.ax_track = fig.add_subplot(gs[:, 1])
+        self.ax_track.set_facecolor('#121212')
+        self.ax_track.plot(self.tel_d1_pos['X'], self.tel_d1_pos['Y'], color=c1, alpha=0.5, linewidth=1)
+        self.ax_track.plot(self.tel_d2_pos['X'], self.tel_d2_pos['Y'], color=c2, alpha=0.5, linewidth=1, linestyle='--')
+        self.ax_track.axis('equal')
+        self.ax_track.axis('off')
+        self.ax_track.set_title("Live Position", color="white")
         
-        ax[1].set_ylabel("Throttle %", color="white")
-        ax[1].tick_params(colors="white")
-        ax[1].set_xlabel("Distance (m)", color="white")
+        # Interactive Markers
+        self.cursor_speed = self.ax_speed.axvline(x=0, color='white', linestyle=':', alpha=0.8)
+        self.cursor_throt = self.ax_throt.axvline(x=0, color='white', linestyle=':', alpha=0.8)
+        
+        self.marker_d1, = self.ax_track.plot([], [], 'o', color='white', markersize=8, markeredgecolor=c1, markeredgewidth=2)
+        self.marker_d2, = self.ax_track.plot([], [], 'o', color='white', markersize=8, markeredgecolor=c2, markeredgewidth=2)
         
         canvas = FigureCanvasTkAgg(fig, master=self.telemetry_frame)
         canvas.get_tk_widget().pack(fill="both", expand=True)
         canvas.draw()
+        
+        # Connect Hover Event
+        canvas.mpl_connect('motion_notify_event', self.on_hover_telemetry)
+
+    def on_hover_telemetry(self, event):
+        if event.inaxes in [self.ax_speed, self.ax_throt]:
+            # Mouse over traces -> update track
+            dist = event.xdata
+            if dist is None: return
+            
+            # Update Cursors
+            self.cursor_speed.set_xdata([dist])
+            self.cursor_throt.set_xdata([dist])
+            
+            # Find Track Pos
+            try:
+                # D1
+                idx1 = (np.abs(self.tel_d1_pos['Distance'] - dist)).argmin()
+                x1, y1 = self.tel_d1_pos['X'].iloc[idx1], self.tel_d1_pos['Y'].iloc[idx1]
+                self.marker_d1.set_data([x1], [y1])
+                
+                # D2
+                idx2 = (np.abs(self.tel_d2_pos['Distance'] - dist)).argmin()
+                x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
+                self.marker_d2.set_data([x2], [y2])
+                
+                event.canvas.draw_idle()
+            except: pass
+            
+        elif event.inaxes == self.ax_track:
+            # Mouse over track -> update traces
+            mx, my = event.xdata, event.ydata
+            if mx is None: return
+            
+            # Find closest distance on D1 track
+            try:
+                dists = np.sqrt((self.tel_d1_pos['X'] - mx)**2 + (self.tel_d1_pos['Y'] - my)**2)
+                idx = dists.argmin()
+                found_dist = self.tel_d1_pos['Distance'].iloc[idx]
+                
+                self.cursor_speed.set_xdata([found_dist])
+                self.cursor_throt.set_xdata([found_dist])
+                
+                # Update Markers
+                x1, y1 = self.tel_d1_pos['X'].iloc[idx], self.tel_d1_pos['Y'].iloc[idx]
+                self.marker_d1.set_data([x1], [y1])
+                
+                # Sync D2
+                idx2 = (np.abs(self.tel_d2_pos['Distance'] - found_dist)).argmin()
+                x2, y2 = self.tel_d2_pos['X'].iloc[idx2], self.tel_d2_pos['Y'].iloc[idx2]
+                self.marker_d2.set_data([x2], [y2])
+                
+                event.canvas.draw_idle()
+            except: pass
 
     def create_strategy_page(self):
         ctk.CTkLabel(self.content_area, text="Race Strategy Analysis", font=("Roboto", 24, "bold")).pack(pady=10)
