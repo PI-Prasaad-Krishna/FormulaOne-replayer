@@ -490,6 +490,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         ctk.CTkEntry(dom_frame, textvariable=self.dom_d2_var, width=50).pack(side="left", padx=5)
         
         ctk.CTkButton(dom_frame, text="Show Dominance", command=self.plot_track_dominance, fg_color="#FF8700").pack(side="left", padx=10)
+        ctk.CTkButton(dom_frame, text="Battle Map (Gap)", command=self.plot_battle_map, fg_color="#9B59B6").pack(side="left", padx=10)
         
         self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -670,6 +671,106 @@ class AnalyticsDashboardApp(ctk.CTk):
             messagebox.showerror("Error", f"Analysis Failed: {e}")
             print(e)
             return
+
+    def plot_battle_map(self):
+        """
+        Visualizes where drivers gained/lost time against each other (Gap Derivative).
+        """
+        session_type = self.track_session_var.get()
+        session = self.load_session(session_type)
+        if not session: return
+        
+        d1 = self.dom_d1_var.get().upper()
+        d2 = self.dom_d2_var.get().upper()
+        
+        try:
+            laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
+            laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
+            
+            if laps_d1 is None or laps_d2 is None:
+                messagebox.showerror("Error", "Data not available.")
+                return
+
+            tel_d1 = laps_d1.get_telemetry().add_distance()
+            tel_d2 = laps_d2.get_telemetry().add_distance()
+            
+            # 1. Align Data
+            total_dist = max(tel_d1['Distance'].max(), tel_d2['Distance'].max())
+            dist = np.linspace(0, total_dist, num=400) # Higher res for smooth gradient
+            
+            t1 = np.interp(dist, tel_d1['Distance'], tel_d1['Time'].dt.total_seconds())
+            t2 = np.interp(dist, tel_d2['Distance'], tel_d2['Time'].dt.total_seconds())
+            
+            # 2. Calculate Gap and Gradient (Time Gained per Distance)
+            gap = t2 - t1 # +ve if D1 is ahead (t2 > t1)
+            
+            # We want to show "Change in Gap" -> Who is faster HERE?
+            # derivative of gap w.r.t distance
+            gap_deriv = np.gradient(gap)
+            
+            # Smoothing
+            from scipy.ndimage import gaussian_filter1d
+            gap_deriv = gaussian_filter1d(gap_deriv, sigma=5)
+            
+            # Normalize for color (symmetric around 0)
+            # +ve deriv: Gap increasing (D1 is faster)
+            # -ve deriv: Gap decreasing (D2 is faster)
+            limit = max(abs(gap_deriv.min()), abs(gap_deriv.max()))
+            
+            # 3. Track coords
+            x_track = tel_d1['X'].to_numpy()
+            y_track = tel_d1['Y'].to_numpy()
+            dist_track = tel_d1['Distance'].to_numpy()
+            
+            x_interp = np.interp(dist, dist_track, x_track)
+            y_interp = np.interp(dist, dist_track, y_track)
+            
+            points = np.array([x_interp, y_interp]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            
+            # 4. Plot
+            for widget in self.track_frame.winfo_children(): widget.destroy()
+            fig, ax = plt.subplots(figsize=(8, 6), facecolor='#121212')
+            ax.set_facecolor('#121212')
+            
+            import matplotlib.collections as mcoll
+            from matplotlib.colors import LinearSegmentedColormap
+            
+            c1 = fastf1.plotting.get_driver_color(d1, session=session)
+            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            
+            # Custom divergent colormap: D2 (Faster) -> D1 (Faster)
+            # D2 is negative deriv, D1 is positive deriv
+            colors = [c2, '#222222', c1] # Blue -> Grey -> Red
+            cmap = LinearSegmentedColormap.from_list("BattleMap", colors)
+            
+            # Norm centered at 0
+            norm = plt.Normalize(-limit, limit)
+            
+            lc = mcoll.LineCollection(segments, cmap=cmap, norm=norm)
+            lc.set_array(gap_deriv)
+            lc.set_linewidth(6)
+            ax.add_collection(lc)
+            
+            ax.axis('off')
+            ax.set_aspect('equal')
+            
+            # Legend
+            legend_lines = [
+                plt.Line2D([0], [0], color=c1, linewidth=4, label=f"{d1} Faster"),
+                plt.Line2D([0], [0], color=c2, linewidth=4, label=f"{d2} Faster")
+            ]
+            ax.legend(handles=legend_lines, facecolor='#333', labelcolor='white')
+            
+            ax.set_title(f"Battle Map: where time was won/lost\n{d1} vs {d2}", color="white")
+            ax.autoscale_view()
+            
+            canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas.draw()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Analysis Failed: {e}")
 
     def create_dna_page(self):
         ctk.CTkLabel(self.content_area, text="Driver DNA", font=("Roboto", 24, "bold")).pack(pady=10)
