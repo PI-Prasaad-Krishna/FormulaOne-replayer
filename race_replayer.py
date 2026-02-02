@@ -163,10 +163,21 @@ def process_telemetry(session):
                 # Use .loc to avoid SettingWithCopyWarning
                 laps = laps.copy()
                 laps['NormLapStartTime'] = laps['LapStartTime'].dt.total_seconds() - global_start_time
+                
+                # FIX: Fallback for Out Laps where LapStartTime might be NaT
+                # Use PitOutTime if available
+                if 'PitOutTime' in laps.columns:
+                     pit_out_norm = laps['PitOutTime'].dt.total_seconds() - global_start_time
+                     laps['NormLapStartTime'] = laps['NormLapStartTime'].fillna(pit_out_norm)
+                
+                # Final Fallback: Forward Fill (Propagate previous lap start)
+                # This ensures we don't drop the lap entirely, even if timing is imprecise
+                laps['NormLapStartTime'] = laps['NormLapStartTime'].ffill()
+                
+                laps = laps.sort_values(by='LapNumber') # Enforce sorting
                 telemetry_data[driver]["Laps"] = laps
             except Exception as e:
                 print(f"Error pre-calculating lap times for {driver}: {e}")
-
             
             # Calculate Pit Intervals (Robust)
             try:
