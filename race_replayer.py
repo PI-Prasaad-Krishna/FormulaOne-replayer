@@ -46,6 +46,13 @@ except:
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
+def format_time(seconds):
+    if seconds is None or seconds < 0:
+        return "00:00.000"
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"{minutes:02}:{secs:06.3f}"
+
 def get_driver_color(driver_code, session=None):
     try:
         # Check if new function exists (fastf1 v3.1+)
@@ -148,6 +155,18 @@ def process_telemetry(session):
                 "Laps": laps, # Store laps for lap counting
                 "PitIntervals": [] # Initialize
             }
+            
+            # Pre-calc normalized lap start times for this driver
+            try:
+                # Avoid modifying the original session.laps slice in place if it affects others, 
+                # but pandas usually copies on filter. Safe to set here.
+                # Use .loc to avoid SettingWithCopyWarning
+                laps = laps.copy()
+                laps['NormLapStartTime'] = laps['LapStartTime'].dt.total_seconds() - global_start_time
+                telemetry_data[driver]["Laps"] = laps
+            except Exception as e:
+                print(f"Error pre-calculating lap times for {driver}: {e}")
+
             
             # Calculate Pit Intervals (Robust)
             try:
@@ -728,10 +747,10 @@ class RaceReplayerApp(ctk.CTk):
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
         if use_3d:
-            self.lap_counter_text = self.ax.text2D(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
+            self.lap_counter_text = self.ax.text2D(0.02, 0.95, "00:00.000", transform=self.ax.transAxes, 
                                                 color='white', fontsize=18, fontweight='bold')
         else:
-            self.lap_counter_text = self.ax.text(0.02, 0.95, "Lap 1", transform=self.ax.transAxes, 
+            self.lap_counter_text = self.ax.text(0.02, 0.95, "00:00.000", transform=self.ax.transAxes, 
                                                 color='white', fontsize=18, fontweight='bold')
 
         self.driver_dots = {}
@@ -996,12 +1015,8 @@ class RaceReplayerApp(ctk.CTk):
                                 else:
                                     current_lap_num = 0
 
-                        if current_lap_num == 0:
-                            self.lap_counter_text.set_text("GRID")
-                        elif current_lap_num > total_laps:
-                            self.lap_counter_text.set_text("FINISH")
-                        else:
-                            self.lap_counter_text.set_text(f"Lap {current_lap_num} / {total_laps}")
+                        # Update Timer instead of Lap Counter
+                        self.lap_counter_text.set_text(format_time(current_race_time))
                     
                     # --- HUD UPDATE ---
                     # Update HUD with Leader's Telemetry
@@ -1116,18 +1131,25 @@ class RaceReplayerApp(ctk.CTk):
                             d_laps = self.telemetry_data[drv]['Laps']
                             
                             compound = "Unknown"
-                            # Filter laps that have started
-                            current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
+                            # Filter laps that have started using pre-calculated float time
+                            # current_race_time is already normalized
                             
-                            started_laps = d_laps[d_laps['LapStartTime'] <= current_session_time]
+                            if 'NormLapStartTime' in d_laps.columns:
+                                started_laps = d_laps[d_laps['NormLapStartTime'] <= current_race_time]
+                            else:
+                                # Fallback (shouldn't happen if setup correct)
+                                current_session_time_dt = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
+                                started_laps = d_laps[d_laps['LapStartTime'] <= current_session_time_dt]
+                            
                             if not started_laps.empty:
+                                # Get the very latest lap
                                 current_lap = started_laps.iloc[-1]
-                                compound = str(current_lap['Compound']).upper()
+                                compound = str(current_lap['Compound']).strip().upper()
                             else:
                                 # Fallback to first lap if race hasn't started for them
                                 if not d_laps.empty:
                                     current_lap = d_laps.iloc[0]
-                                    compound = str(current_lap['Compound']).upper()
+                                    compound = str(current_lap['Compound']).strip().upper()
 
                             if 'SOFT' in compound:
                                 tyre_text = "Soft"
@@ -1144,6 +1166,15 @@ class RaceReplayerApp(ctk.CTk):
                             elif 'WET' in compound:
                                 tyre_text = "Wet"
                                 tyre_color = "#00AEEF" # Cyan
+                            elif 'HYPERSOFT' in compound: # Legacy support
+                                tyre_text = "Hyp"
+                                tyre_color = "#FFB6C1" # Pink
+                            elif 'ULTRASOFT' in compound: # Legacy support
+                                tyre_text = "Utr"
+                                tyre_color = "#800080" # Purple
+                            elif 'SUPERSOFT' in compound: # Legacy support
+                                tyre_text = "Sup"
+                                tyre_color = "#FF0000" # Red
                             else:
                                 # Show first 3 chars if unknown/NAN
                                 tyre_text = compound[:3] if compound and compound != "NAN" else "?"
