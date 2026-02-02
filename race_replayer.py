@@ -959,9 +959,7 @@ class RaceReplayerApp(ctk.CTk):
                     dot.set_data([x], [y])
                     self.driver_labels[driver].set_position((x + 200, y + 200))
                     
-                    if is_pitting:
-                         label_text = f"{driver} (PIT)"
-                    elif is_dnf:
+                    if is_dnf:
                          label_text = f"{driver} (DNF)"
                     else:
                          label_text = driver
@@ -1119,8 +1117,8 @@ class RaceReplayerApp(ctk.CTk):
                         
                 except: pass
 
-            # Update Leaderboard (Every 5th frame)
-            if frame_idx % 5 == 0:
+            # Update Leaderboard (Every frame for smoothness)
+            if frame_idx % 1 == 0:
                 # SORTING LOGIC: Total Distance
                 leaderboard_data.sort(key=lambda x: x[1], reverse=True)
                 
@@ -1146,7 +1144,9 @@ class RaceReplayerApp(ctk.CTk):
                             # current_race_time is already normalized
                             
                             if 'NormLapStartTime' in d_laps.columns:
-                                started_laps = d_laps[d_laps['NormLapStartTime'] <= current_race_time]
+                                # Add 1s buffer to current time to ensure we catch the lap start immediately
+                                # matching visual pit exit better and preventing lag
+                                started_laps = d_laps[d_laps['NormLapStartTime'] <= (current_race_time + 1.0)]
                             else:
                                 # Fallback (shouldn't happen if setup correct)
                                 current_session_time_dt = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
