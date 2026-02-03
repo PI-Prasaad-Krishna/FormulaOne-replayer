@@ -24,6 +24,7 @@ import sys
 import customtkinter as ctk # PIP INSTALL CUSTOMTKINTER
 import tkinter as tk
 from tkinter import messagebox
+import threading
 
 # Configure output for standard text
 if sys.platform.startswith("win"):
@@ -616,6 +617,11 @@ class RaceReplayerApp(ctk.CTk):
         self.lap_counter_text = None
         self.hud_elements = {} # Store HUD artists
         self.current_frame = 0
+        
+        # Resize Handling
+        self.resize_timer = None
+        self.was_playing = False
+        self.map_frame.bind("<Configure>", self.on_resize)
 
         # Bind scroll event for 3D zoom
         self.canvas.mpl_connect('scroll_event', self.on_scroll)
@@ -686,32 +692,67 @@ class RaceReplayerApp(ctk.CTk):
         except ValueError:
             messagebox.showerror("Input Error", "Year must be a number.")
             return
-        
-            return
-        
+
+        # Disable Load Button to prevent multiple clicks
+        self.load_btn.configure(state="disabled", text="LOADING...")
         self.status_lbl.configure(text="Loading Data... (Please Wait)", text_color="orange")
-        # Reset Animation Toggle if needed
+        
+        # Stop existing animation
         if self.anim: 
              try: self.anim.event_source.stop()
              except: pass
-        self.update()
-        
-        session = load_race_data(year, circuit, "R")
-        if not session:
-            self.status_lbl.configure(text="Data Load Failed", text_color="red")
-            messagebox.showerror("Error", f"Could not load data for {year} {circuit}")
-            return
+        self.update() # Force UI update immediately
 
-        self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, self.race_start_offset, self.weather_data, self.track_status_data, self.global_start_time, self.lap_sector_data, self.pit_lane_path = process_telemetry(session)
-        if not self.telemetry_data:
-             self.status_lbl.configure(text="No Telemetry Found", text_color="red")
-             return
+        # Start Thread
+        loader_thread = threading.Thread(target=self.perform_loading, args=(year, circuit), daemon=True)
+        loader_thread.start()
+
+    def perform_loading(self, year, circuit):
+        """ Run in background thread """
+        try:
+            session = load_race_data(year, circuit, "R")
+            if not session:
+                self.after(0, self.finish_loading, (False, "Could not load session data."))
+                return
+
+            results = process_telemetry(session)
+            # results might be (None, ...) if telemetry failed, check first element
+            if not results or results[0] is None:
+                 self.after(0, self.finish_loading, (False, "No Telemetry Found"))
+            else:
+                 self.after(0, self.finish_loading, (True, results))
+                 
+        except Exception as e:
+            self.after(0, self.finish_loading, (False, f"Error: {str(e)}"))
+
+    def finish_loading(self, result):
+        """ Run in main thread """
+        success, data = result
+        
+        # Re-enable button
+        self.load_btn.configure(state="normal", text="LOAD RACE")
+
+        if not success:
+            error_msg = data
+            self.status_lbl.configure(text=f"Load Failed: {error_msg}", text_color="red")
+            messagebox.showerror("Error", error_msg)
+            return
+        
+        # Unpack Data
+        # (telemetry_data, common_time, lap_start_times, lap_numbers, race_start_offset, 
+        #  weather_data, track_status_data, global_start_time, lap_sector_data, pit_lane_path)
+        (self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, 
+         self.race_start_offset, self.weather_data, self.track_status_data, 
+         self.global_start_time, self.lap_sector_data, self.pit_lane_path) = data
              
         self.setup_plot()
         self.start_animation(start_frame=int(self.race_start_offset / 0.2))
         self.pause_btn.configure(state="normal", text="PAUSE", fg_color="#E10600")
         self.is_paused = False
         self.is_finished = False
+        
+        year = self.year_entry.get()
+        circuit = self.circuit_entry.get()
         self.status_lbl.configure(text=f"Replaying: {year} {circuit}", text_color="#2CC985")
 
                                     
@@ -853,6 +894,36 @@ class RaceReplayerApp(ctk.CTk):
              
         self.apply_zoom()
         self.canvas.draw()
+        
+    def on_resize(self, event):
+        """ Debounce resize events to prevent crash with blit=True """
+        # Only care if map frame size changed
+        if self.resize_timer:
+            self.after_cancel(self.resize_timer)
+            
+        if self.anim and self.anim.event_source:
+             try:
+                 self.anim.event_source.stop()
+                 if not self.is_paused and not self.is_finished:
+                     self.was_playing = True
+                     self.is_paused = True # Mark as paused temporarily
+             except: pass
+        
+        # Schedule finish_resize
+        self.resize_timer = self.after(500, self.finish_resize)
+
+    def finish_resize(self):
+        """ Restart animation after resize settles """
+        self.canvas.draw() # Redraw to fix resolution
+        
+        if self.was_playing:
+            self.is_paused = False
+            self.was_playing = False
+            self.start_animation(self.current_frame)
+        elif self.telemetry_data:
+             # Just redraw static if we were paused
+             # self.setup_plot() # Might be too heavy, but draw() above captures it
+             pass
 
     def change_speed(self, choice):
         if self.anim and not self.is_paused and not self.is_finished:
@@ -865,7 +936,8 @@ class RaceReplayerApp(ctk.CTk):
         
         if self.is_paused:
             try:
-                self.anim.event_source.start()
+                # RESUME: Call start_animation to pick up new speed settings
+                self.start_animation(start_frame=self.current_frame)
                 self.pause_btn.configure(text="PAUSE", fg_color="#E10600")
                 self.is_paused = False
             except AttributeError:
