@@ -773,8 +773,12 @@ class RaceReplayerApp(ctk.CTk):
         # Check Mode
         use_3d = self.is_3d_mode.get()
         
+        # --- 1. SPLIT FIGURES (Map vs HUD) ---
+        # Map: Left 75%
+        # HUD: Right 25%
+        
         if use_3d:
-            self.ax = self.fig.add_subplot(111, projection='3d')
+            self.ax = self.fig.add_axes([0.0, 0.0, 0.75, 1.0], projection='3d')
             self.ax.set_facecolor('#121212')
             # Pane colors
             self.ax.xaxis.set_pane_color((0.1, 0.1, 0.1, 1.0))
@@ -782,9 +786,17 @@ class RaceReplayerApp(ctk.CTk):
             self.ax.zaxis.set_pane_color((0.1, 0.1, 0.1, 1.0))
             self.ax.grid(False)
         else:
-            self.ax = self.fig.add_subplot(111)
+            self.ax = self.fig.add_axes([0.0, 0.0, 0.75, 1.0])
             self.ax.axis('off')
             self.ax.set_facecolor('#121212')
+            
+        # HUD Axes (Always 2D)
+        self.ax_hud = self.fig.add_axes([0.75, 0.0, 0.25, 1.0])
+        self.ax_hud.set_facecolor('#181818') # Slightly lighter background for sidebar
+        self.ax_hud.axis('off')
+        
+        # Add visual separator line
+        self.ax_hud.axvline(0, color='#333333', linewidth=2)
         
         ref_driver = list(self.telemetry_data.keys())[0]
         ref_x = self.telemetry_data[ref_driver]["X"]
@@ -798,6 +810,7 @@ class RaceReplayerApp(ctk.CTk):
         else:
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
+        # Lap Counter (Top Left of Map)
         if use_3d:
             self.lap_counter_text = self.ax.text2D(0.02, 0.95, "00:00.000", transform=self.ax.transAxes, 
                                                 color='white', fontsize=18, fontweight='bold')
@@ -819,8 +832,7 @@ class RaceReplayerApp(ctk.CTk):
             
             self.driver_dots[driver] = dot
             
-            # Text in 3D is tricky, we use common text() which works but depth is weird. 
-            # Or text2D for overlay? Let's use world coordinates text.
+            # Text in 3D
             if use_3d:
                  text = self.ax.text(0, 0, 0, driver, color=color, fontsize=8, fontweight='bold')
             else:
@@ -828,49 +840,47 @@ class RaceReplayerApp(ctk.CTk):
                                 bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', pad=1))
             self.driver_labels[driver] = text
         
-        # --- HUD SETUP (Same for both, uses Axes Transform) ---
+        # --- HUD LAYOUT (Sidebar) ---
         
-        # Helper for text
-        def add_text(x, y, s, **kwargs):
-            if use_3d:
-                return self.ax.text2D(x, y, s, transform=self.ax.transAxes, **kwargs)
-            else:
-                return self.ax.text(x, y, s, transform=self.ax.transAxes, **kwargs)
+        # Helper for HUD text (uses ax_hud)
+        def add_hud_text(x, y, s, **kwargs):
+             return self.ax_hud.text(x, y, s, transform=self.ax_hud.transAxes, **kwargs)
 
-        # Speed & Gear Group
-        self.hud_speed = add_text(0.92, 0.12, "0", color='white', fontsize=24, fontweight='bold', ha='right')
-        self.hud_unit = add_text(0.93, 0.12, "km/h", color='gray', fontsize=10, ha='left')
-        
-        self.hud_gear = add_text(0.82, 0.12, "N", color='#00ff00', fontsize=24, fontweight='bold', ha='center')
-        
-        # RPM
-        self.hud_rpm = add_text(0.875, 0.02, "RPM: 0", color='white', fontsize=8, ha='center')
-        
-        # Driver Name Label for HUD
-        self.hud_driver = add_text(0.875, 0.17, "LEADER", color='white', fontsize=10, fontweight='bold', ha='center',
-                                      bbox=dict(facecolor='black', alpha=0.3, pad=2, edgecolor='none'))
+        # 1. HEADER (Top)
+        add_hud_text(0.5, 0.92, "TELEMETRY", color='gray', fontsize=10, ha='center', weight='bold')
+        self.hud_driver = add_hud_text(0.5, 0.88, "LEADER", color='white', 
+                                  fontsize=14, fontweight='bold', ha='center',
+                                  bbox=dict(facecolor='#222222', alpha=0.8, pad=4, edgecolor='none'))
 
-         # Bars (Patches) - NOTE: patches can be added to 3D axes but they are 2D objects in 3D space usually.
-         # For 3D axes, standard 2D patches/rectangles in transAxes MIGHT NOT SHOW UP depending on backend.
-         # TkAgg usually handles it.
+        # 2. SPEED (Upper Middle)
+        self.hud_speed = add_hud_text(0.5, 0.70, "0", color='white', fontsize=40, fontweight='bold', ha='center')
+        self.hud_unit = add_hud_text(0.5, 0.64, "km/h", color='gray', fontsize=12, ha='center')
         
-        # Throttle Bar Background
-        # We assume 2D overlay works. If not, we might lose bars in 3D mode.
-        if not use_3d:
-             # Full HUD in 2D
-             self.ax.add_patch(plt.Rectangle((0.80, 0.08), 0.15, 0.02, transform=self.ax.transAxes, color='#333333'))
-             self.hud_thr_bar = plt.Rectangle((0.80, 0.08), 0.0, 0.02, transform=self.ax.transAxes, color='#2CC985')
-             self.ax.add_patch(self.hud_thr_bar)
-             
-             self.ax.add_patch(plt.Rectangle((0.80, 0.05), 0.15, 0.02, transform=self.ax.transAxes, color='#333333'))
-             self.hud_brk_bar = plt.Rectangle((0.80, 0.05), 0.0, 0.02, transform=self.ax.transAxes, color='#E10600')
-             self.ax.add_patch(self.hud_brk_bar)
-        else:
-             # Minimal HUD in 3D (Text only) or try to force it. 
-             # Matplotlib 3D doesn't support add_patch with transAxes easily. 
-             # We will skip bars in 3D for stability.
-             self.hud_thr_bar = None
-             self.hud_brk_bar = None
+        # 3. GEAR & RPM (Middle)
+        # Gear Circle background
+        # self.ax_hud.add_patch(plt.Circle((0.5, 0.52), 0.08, transform=self.ax_hud.transAxes, color='#222222'))
+        self.hud_gear = add_hud_text(0.5, 0.52, "N", color='#00ff00', fontsize=30, fontweight='bold', ha='center', va='center')
+        self.hud_rpm = add_hud_text(0.5, 0.45, "0 RPM", color='lightgray', fontsize=12, ha='center')
+        
+        # 4. BARS (Bottom)
+        # Vertical arrangement for sidebar? Or Horizontal?
+        # Let's do Horizontal bars but stacked.
+        
+        # Throttle
+        add_hud_text(0.1, 0.30, "THR", color='gray', fontsize=10, ha='left')
+        self.hud_thr_text = add_hud_text(0.9, 0.30, "0%", color='#2CC985', fontsize=10, ha='right')
+        
+        self.ax_hud.add_patch(plt.Rectangle((0.10, 0.27), 0.80, 0.02, transform=self.ax_hud.transAxes, color='#333333'))
+        self.hud_thr_bar = plt.Rectangle((0.10, 0.27), 0.0, 0.02, transform=self.ax_hud.transAxes, color='#2CC985')
+        self.ax_hud.add_patch(self.hud_thr_bar)
+        
+        # Brake
+        add_hud_text(0.1, 0.20, "BRK", color='gray', fontsize=10, ha='left')
+        self.hud_brk_text = add_hud_text(0.9, 0.20, "0%", color='#E10600', fontsize=10, ha='right')
+        
+        self.ax_hud.add_patch(plt.Rectangle((0.10, 0.17), 0.80, 0.02, transform=self.ax_hud.transAxes, color='#333333'))
+        self.hud_brk_bar = plt.Rectangle((0.10, 0.17), 0.0, 0.02, transform=self.ax_hud.transAxes, color='#E10600')
+        self.ax_hud.add_patch(self.hud_brk_bar)
 
         valid_x = ref_x[mask]
         valid_y = ref_y[mask]
@@ -1124,13 +1134,19 @@ class RaceReplayerApp(ctk.CTk):
                         # Throttle (0-100)
                         if self.hud_thr_bar:
                             thr_val = l_data["Throttle"][l_idx]
-                            self.hud_thr_bar.set_width(0.15 * (thr_val / 100.0))
+                            # Width relative to AXES (0.80 max width set in setup_plot)
+                            self.hud_thr_bar.set_width(0.80 * (thr_val / 100.0))
+                            if self.hud_thr_text:
+                                self.hud_thr_text.set_text(f"{int(thr_val)}%")
                         
                         # Brake (0-100 or bool)
                         if self.hud_brk_bar:
                             brk_val = l_data["Brake"][l_idx]
-                            if brk_val <= 1.05: brk_val *= 100.0 
-                            self.hud_brk_bar.set_width(0.15 * (brk_val / 100.0))
+                            if brk_val <= 1.05: brk_val *= 100.0
+                            if brk_val > 100: brk_val = 100 
+                            self.hud_brk_bar.set_width(0.80 * (brk_val / 100.0))
+                            if self.hud_brk_text:
+                                self.hud_brk_text.set_text(f"{int(brk_val)}%")
                         
                         self.hud_driver.set_text(f"{leader_driver} (LEADER)")
                         self.hud_driver.set_color(l_data["Color"])
@@ -1287,7 +1303,21 @@ class RaceReplayerApp(ctk.CTk):
                     else:
                         row_frame.pack_forget()
             
-            return list(self.driver_dots.values()) + list(self.driver_labels.values()) + [self.lap_counter_text]
+            # --- RETURN UPDATED ARTISTS FOR BLIT ---
+            artists = list(self.driver_dots.values()) + list(self.driver_labels.values()) + [self.lap_counter_text]
+            
+            # Append HUD Artists (if they exist)
+            if self.hud_speed: artists.append(self.hud_speed)
+            if self.hud_gear: artists.append(self.hud_gear)
+            if self.hud_rpm: artists.append(self.hud_rpm)
+            if self.hud_driver: artists.append(self.hud_driver)
+            if self.hud_unit: artists.append(self.hud_unit)
+            if self.hud_thr_bar: artists.append(self.hud_thr_bar)
+            if self.hud_brk_bar: artists.append(self.hud_brk_bar)
+            if self.hud_thr_text: artists.append(self.hud_thr_text)
+            if self.hud_brk_text: artists.append(self.hud_brk_text)
+            
+            return artists
 
         self.anim = FuncAnimation(self.fig, update, frames=(total_frames - start_frame) // step_frames, 
                                   interval=base_interval, blit=True, repeat=False)
