@@ -511,6 +511,15 @@ class RaceReplayerApp(ctk.CTk):
         self.title("F1 Race Replayer 2025 - Modern Edition")
         self.geometry("1400x900")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        
+        # State for Selection
+        self.selected_driver = None
+        self.leaderboard_data_ref = [] # To store current frame's leaderboard order
+        
+        # Animation State
+        self.anim = None
+
+
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -594,8 +603,21 @@ class RaceReplayerApp(ctk.CTk):
             gap_lbl = ctk.CTkLabel(row_frame, text="", font=("Mono", 11), width=80, anchor="e")
             gap_lbl.pack(side="left", padx=5)
             
+            # Make interactive
+            # We use a closure to capture 'i' correctly
+            def make_handler(index):
+                return lambda e: self.on_row_click(index)
+            
+            handler = make_handler(i)
+            
+            row_frame.bind("<Button-1>", handler)
+            pos_lbl.bind("<Button-1>", handler)
+            drv_lbl.bind("<Button-1>", handler)
+            tyre_lbl.bind("<Button-1>", handler)
+            gap_lbl.bind("<Button-1>", handler)
+            
             self.lb_rows.append((row_frame, pos_lbl, drv_lbl, tyre_lbl, gap_lbl))
-
+            
         # -- 3. Map Canvas (Center/Right) --
         self.map_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#121212")
         self.map_frame.grid(row=1, column=1, columnspan=2, sticky="nsew")
@@ -625,6 +647,29 @@ class RaceReplayerApp(ctk.CTk):
 
         # Bind scroll event for 3D zoom
         self.canvas.mpl_connect('scroll_event', self.on_scroll)
+
+    def on_row_click(self, row_idx):
+        """ Handle click on leaderboard row """
+        if not self.leaderboard_data_ref or row_idx >= len(self.leaderboard_data_ref):
+            return
+            
+        clicked_driver = self.leaderboard_data_ref[row_idx][0]
+        
+        if self.selected_driver == clicked_driver:
+            # Deselect
+            self.selected_driver = None
+            print(f"[Selection] Deselected {clicked_driver}. Returning to Leader.")
+        else:
+            # Select
+            self.selected_driver = clicked_driver
+            print(f"[Selection] Selected {clicked_driver}")
+            
+        # Force update will happen next frame, or we could force it here if paused.
+        # If paused, we might want to manually refresh HUD:
+        if self.is_paused:
+             # Basic refresh if possible, but data might be stale. 
+             # Simplest is just to wait for next frame or user resume.
+             pass
 
     def on_scroll(self, event):
         """ Zoom in/out with scroll wheel in 3D mode by adjusting axis limits """
@@ -678,7 +723,7 @@ class RaceReplayerApp(ctk.CTk):
         # self.ax.set_zlim(...) 
 
     def on_close(self):
-        if self.anim:
+        if getattr(self, 'anim', None):
             try: self.anim.event_source.stop()
             except: pass
         self.quit()
@@ -1071,6 +1116,9 @@ class RaceReplayerApp(ctk.CTk):
                     active_runners.sort(key=lambda x: x[1], reverse=True)
                     leader_driver = active_runners[0][0]
                     
+                    # Define HUD Driver immediately available for use
+                    hud_driver_name = self.selected_driver if self.selected_driver else leader_driver
+                    
                     # 2. Get Leader's Lap Data
                     if leader_driver in self.telemetry_data:
                         laps_df = self.telemetry_data[leader_driver]["Laps"]
@@ -1110,10 +1158,9 @@ class RaceReplayerApp(ctk.CTk):
                         self.lap_counter_text.set_text(format_time(current_race_time))
                     
                     # --- HUD UPDATE ---
-                    # Update HUD with Leader's Telemetry
-                    # (In future we can add a 'Selected Driver' for this)
-                    if leader_driver in self.telemetry_data:
-                        l_data = self.telemetry_data[leader_driver]
+                    # Update HUD with Selected Driver's Telemetry
+                    if hud_driver_name in self.telemetry_data:
+                        l_data = self.telemetry_data[hud_driver_name]
                         # Safe Index Check
                         l_len = len(l_data["X"])
                         l_idx = min(idx, l_len - 1)
@@ -1148,7 +1195,11 @@ class RaceReplayerApp(ctk.CTk):
                             if self.hud_brk_text:
                                 self.hud_brk_text.set_text(f"{int(brk_val)}%")
                         
-                        self.hud_driver.set_text(f"{leader_driver} (LEADER)")
+                        # Label Update
+                        if self.selected_driver:
+                             self.hud_driver.set_text(f"{hud_driver_name}")
+                        else:
+                             self.hud_driver.set_text(f"{hud_driver_name} (LEADER)")
                         self.hud_driver.set_color(l_data["Color"])
 
             except Exception as e:
@@ -1210,14 +1261,33 @@ class RaceReplayerApp(ctk.CTk):
                 # SORTING LOGIC: Total Distance
                 leaderboard_data.sort(key=lambda x: x[1], reverse=True)
                 
+                # STORE REFERENCE FOR CLICK HANDLER
+                self.leaderboard_data_ref = leaderboard_data
+                
                 active_leaders = [d for d in leaderboard_data if not d[2]]
                 leader_dist = active_leaders[0][1] if active_leaders else 0
+                
+                # Determine HUD Driver (Selected or Leader)
+                # No longer needed to define here as we defined it above, but we keep it for reference if needed
+                # hud_driver_name = self.selected_driver if self.selected_driver else leader_driver
                 
                 for i, (row_frame, pos_lbl, drv_lbl, tyre_lbl, gap_lbl) in enumerate(self.lb_rows):
                     if i < len(leaderboard_data):
                         row_frame.pack(fill="x", pady=2)
                         drv, dist, is_dnf = leaderboard_data[i]
                         
+                        # HIGHLIGHT SELECTION
+                        if drv == self.selected_driver:
+                             # Modern Highlight: Dark Grey with Green Accent/Border
+                             row_frame.configure(fg_color="#333333", border_width=1, border_color="#2CC985")
+                             pos_lbl.configure(text_color="#2CC985")
+                             drv_lbl.configure(text_color="#2CC985", font=("Roboto", 12, "bold"))
+                        else:
+                             # Default (Dark Mode)
+                             row_frame.configure(fg_color="#2b2b2b", border_width=0) 
+                             pos_lbl.configure(text_color="white")
+                             drv_lbl.configure(text_color="white", font=("Roboto", 12))
+
                         drv_lbl.configure(text=drv)
                         
                         # Tyre Logic
@@ -1302,6 +1372,7 @@ class RaceReplayerApp(ctk.CTk):
                                 pos_lbl.configure(text_color="white")
                     else:
                         row_frame.pack_forget()
+
             
             # --- RETURN UPDATED ARTISTS FOR BLIT ---
             artists = list(self.driver_dots.values()) + list(self.driver_labels.values()) + [self.lap_counter_text]
