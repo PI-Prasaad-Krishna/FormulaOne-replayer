@@ -640,6 +640,10 @@ class RaceReplayerApp(ctk.CTk):
         self.hud_elements = {} # Store HUD artists
         self.current_frame = 0
         
+        # UI State Cache (Prevent Redundant Updates)
+        self.row_states = {} 
+
+        
         # Resize Handling
         self.resize_timer = None
         self.was_playing = False
@@ -1273,22 +1277,10 @@ class RaceReplayerApp(ctk.CTk):
                 
                 for i, (row_frame, pos_lbl, drv_lbl, tyre_lbl, gap_lbl) in enumerate(self.lb_rows):
                     if i < len(leaderboard_data):
-                        row_frame.pack(fill="x", pady=2)
                         drv, dist, is_dnf = leaderboard_data[i]
                         
-                        # HIGHLIGHT SELECTION
-                        if drv == self.selected_driver:
-                             # Modern Highlight: Dark Grey with Green Accent/Border
-                             row_frame.configure(fg_color="#333333", border_width=1, border_color="#2CC985")
-                             pos_lbl.configure(text_color="#2CC985")
-                             drv_lbl.configure(text_color="#2CC985", font=("Roboto", 12, "bold"))
-                        else:
-                             # Default (Dark Mode)
-                             row_frame.configure(fg_color="#2b2b2b", border_width=0) 
-                             pos_lbl.configure(text_color="white")
-                             drv_lbl.configure(text_color="white", font=("Roboto", 12))
-
-                        drv_lbl.configure(text=drv)
+                        # Calculate Data
+                        is_selected = (drv == self.selected_driver)
                         
                         # Tyre Logic
                         tyre_text = "?"
@@ -1298,80 +1290,90 @@ class RaceReplayerApp(ctk.CTk):
                             d_laps = self.telemetry_data[drv]['Laps']
                             
                             compound = "Unknown"
-                            # Filter laps that have started using pre-calculated float time
-                            # current_race_time is already normalized
-                            
                             if 'NormLapStartTime' in d_laps.columns:
-                                # Add 1s buffer to current time to ensure we catch the lap start immediately
-                                # matching visual pit exit better and preventing lag
                                 started_laps = d_laps[d_laps['NormLapStartTime'] <= (current_race_time + 1.0)]
                             else:
-                                # Fallback (shouldn't happen if setup correct)
                                 current_session_time_dt = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
                                 started_laps = d_laps[d_laps['LapStartTime'] <= current_session_time_dt]
                             
                             if not started_laps.empty:
-                                # Get the very latest lap
                                 current_lap = started_laps.iloc[-1]
                                 compound = str(current_lap['Compound']).strip().upper()
-                            else:
-                                # Fallback to first lap if race hasn't started for them
-                                if not d_laps.empty:
-                                    current_lap = d_laps.iloc[0]
-                                    compound = str(current_lap['Compound']).strip().upper()
+                            elif not d_laps.empty:
+                                current_lap = d_laps.iloc[0]
+                                compound = str(current_lap['Compound']).strip().upper()
 
                             if 'SOFT' in compound:
-                                tyre_text = "Soft"
-                                tyre_color = "#FF3333" # Red
+                                tyre_text = "Soft"; tyre_color = "#FF3333"
                             elif 'MEDIUM' in compound:
-                                tyre_text = "Medium"
-                                tyre_color = "#FFE000" # Yellow
+                                tyre_text = "Medium"; tyre_color = "#FFE000"
                             elif 'HARD' in compound:
-                                tyre_text = "Hard"
-                                tyre_color = "white"
+                                tyre_text = "Hard"; tyre_color = "white"
                             elif 'INTER' in compound:
-                                tyre_text = "Inter"
-                                tyre_color = "#39B54A" # Green
+                                tyre_text = "Inter"; tyre_color = "#39B54A"
                             elif 'WET' in compound:
-                                tyre_text = "Wet"
-                                tyre_color = "#00AEEF" # Cyan
-                            elif 'HYPERSOFT' in compound: # Legacy support
-                                tyre_text = "Hyp"
-                                tyre_color = "#FFB6C1" # Pink
-                            elif 'ULTRASOFT' in compound: # Legacy support
-                                tyre_text = "Utr"
-                                tyre_color = "#800080" # Purple
-                            elif 'SUPERSOFT' in compound: # Legacy support
-                                tyre_text = "Sup"
-                                tyre_color = "#FF0000" # Red
+                                tyre_text = "Wet"; tyre_color = "#00AEEF"
+                            elif 'HYPERSOFT' in compound:
+                                tyre_text = "Hyp"; tyre_color = "#FFB6C1"
+                            elif 'ULTRASOFT' in compound:
+                                tyre_text = "Utr"; tyre_color = "#800080"
+                            elif 'SUPERSOFT' in compound:
+                                tyre_text = "Sup"; tyre_color = "#FF0000"
                             else:
-                                # Show first 3 chars if unknown/NAN
                                 tyre_text = compound[:3] if compound and compound != "NAN" else "?"
                                 tyre_color = "gray"
-                            
-                        except Exception as e: 
-                            print(f"Tyre Error {drv}: {e}")
-                            print(f"Columns: {d_laps.columns}")
+                        except: 
                             tyre_text = "Err"
-                        
-                        tyre_lbl.configure(text=tyre_text, text_color=tyre_color)
 
+                        # Gap Logic
                         if is_dnf:
-                             gap_lbl.configure(text="DNF", text_color="red")
-                             drv_lbl.configure(text_color="gray")
-                             pos_lbl.configure(text_color="gray")
+                             gap_text = "DNF"
+                             gap_color = "red"
+                             main_text_color = "gray"
                         else:
+                            main_text_color = "white"
                             if i == 0:
-                                gap_lbl.configure(text="LEADER", text_color="#2CC985")
-                                drv_lbl.configure(text_color="#2CC985")
-                                pos_lbl.configure(text_color="#2CC985")
+                                gap_text = "LEADER"
+                                gap_color = "#2CC985"
+                                main_text_color = "#2CC985"
                             else:
                                 gap = leader_dist - dist
-                                gap_lbl.configure(text=f"-{gap:.0f} m", text_color="white")
-                                drv_lbl.configure(text_color="white")
-                                pos_lbl.configure(text_color="white")
+                                gap_text = f"-{gap:.0f} m"
+                                gap_color = "white"
+                        
+                        if is_selected:
+                             main_text_color = "#2CC985"
+                        
+                        # --- STATE CHECK ---
+                        # Create a signature of the visual state
+                        new_state = (drv, is_selected, tyre_text, tyre_color, gap_text, gap_color, main_text_color)
+                        
+                        if self.row_states.get(i) == new_state:
+                            continue # SKIP UPDATE IF IDENTICAL
+                            
+                        # Apply Updates
+                        self.row_states[i] = new_state
+                        row_frame.pack(fill="x", pady=2) # Ensure packed
+                        
+                        # 1. Style Container
+                        if is_selected:
+                             row_frame.configure(fg_color="#333333", border_width=1, border_color="#2CC985")
+                             drv_lbl.configure(font=("Roboto", 12, "bold"))
+                        else:
+                             # Transparent makes it look cleaner and prevents "box" artifacts
+                             row_frame.configure(fg_color="transparent", border_width=0) 
+                             drv_lbl.configure(font=("Roboto", 12))
+
+                        # 2. Update Text Content
+                        drv_lbl.configure(text=drv, text_color=main_text_color)
+                        pos_lbl.configure(text_color=main_text_color)
+                        
+                        tyre_lbl.configure(text=tyre_text, text_color=tyre_color)
+                        gap_lbl.configure(text=gap_text, text_color=gap_color)
+                        
                     else:
                         row_frame.pack_forget()
+                        self.row_states[i] = None # Clear state
 
             
             # --- RETURN UPDATED ARTISTS FOR BLIT ---
