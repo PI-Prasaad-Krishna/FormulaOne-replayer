@@ -651,6 +651,83 @@ class RaceReplayerApp(ctk.CTk):
 
         # Bind scroll event for 3D zoom
         self.canvas.mpl_connect('scroll_event', self.on_scroll)
+        
+        # --- SMOOTH 3D CAMERA ---
+        # State
+        self.cam_azim = -60.0
+        self.cam_elev = 30.0
+        self.target_azim = -60.0
+        self.target_elev = 30.0
+        self.last_mouse_x = 0
+        self.last_mouse_y = 0
+        self.is_dragging = False
+        
+        # Bindings (On the Canvas Widget)
+        # Note: We bind to the Tkinter widget to bypass Matplotlib's default handler if needed
+        tk_canvas = self.canvas.get_tk_widget()
+        tk_canvas.bind("<ButtonPress-1>", self.on_cam_press)
+        tk_canvas.bind("<B1-Motion>", self.on_cam_drag)
+        tk_canvas.bind("<ButtonRelease-1>", self.on_cam_release)
+        
+        # Start Physics Loop
+        self.update_camera_physics()
+
+    def on_cam_press(self, event):
+        if not self.is_3d_mode.get(): return
+        self.is_dragging = True
+        self.last_mouse_x = event.x
+        self.last_mouse_y = event.y
+
+    def on_cam_drag(self, event):
+        if not self.is_3d_mode.get() or not self.is_dragging: return
+        
+        dx = event.x - self.last_mouse_x
+        dy = event.y - self.last_mouse_y
+        
+        # Sensitivity
+        factor = 0.5
+        
+        # Update TARGET (not current) to create "pull" effect
+        self.target_azim -= dx * factor
+        self.target_elev += dy * factor
+        
+        # Clamp Elev
+        self.target_elev = max(0, min(90, self.target_elev))
+        
+        self.last_mouse_x = event.x
+        self.last_mouse_y = event.y
+
+    def on_cam_release(self, event):
+        self.is_dragging = False
+
+    def update_camera_physics(self):
+        """ Smoothly interpolate camera to target position """
+        if self.is_3d_mode.get() and self.ax:
+             # Inertia / Damping Factor (Lower = Smoother/Slower)
+             lerp_factor = 0.1
+             
+             # Calculate Diff
+             diff_azim = self.target_azim - self.cam_azim
+             diff_elev = self.target_elev - self.cam_elev
+             
+             # Apply if significant movement needed (prevent micro-jitter)
+             if abs(diff_azim) > 0.01 or abs(diff_elev) > 0.01:
+                 self.cam_azim += diff_azim * lerp_factor
+                 self.cam_elev += diff_elev * lerp_factor
+                 
+                 try:
+                     self.ax.view_init(elev=self.cam_elev, azim=self.cam_azim)
+                     
+                     # Check if we should draw manually
+                     # If playing, FuncAnimation is already drawing loop. Drawing here triggers DOUBLE DRAW (Lag).
+                     if self.anim and not self.is_paused and not self.is_finished:
+                          pass # Do nothing, let animation frame pick up the new angle
+                     else:
+                          self.canvas.draw_idle() 
+                 except: pass
+
+        # Run loop at ~60FPS (16ms)
+        self.after(16, self.update_camera_physics)
 
     def on_row_click(self, row_idx):
         """ Handle click on leaderboard row """
@@ -857,34 +934,69 @@ class RaceReplayerApp(ctk.CTk):
         if use_3d:
              # --- 3D CURTAIN EFFECT ---
              try:
-                 # 1. Prepare Data
+                 # 1. Prepare Data & Downsample for Performance
+                 # Take every 5th point for the main line, every 10th for the mesh
+                 # This reduces vertex count by ~90% for smoother rotation
+                 
+                 step_line = 5
+                 step_mesh = 5 # Medium density 
+                 
                  valid_x, valid_y, valid_z = ref_x[mask], ref_y[mask], ref_z[mask]
                  
-                 # Base Level (Drop 20m below lowest point for dramatic effect / clearance)
+                 x_mesh_data = valid_x[::step_mesh]
+                 y_mesh_data = valid_y[::step_mesh]
+                 z_mesh_data = valid_z[::step_mesh]
+                 
+                 # Base Level
                  z_min = np.min(valid_z) - 20 
                  
-                 # 2. Create Mesh for "Ribbon"
-                 # We create a 2xN grid. Top row = Track Z, Bottom row = Base Z
-                 X_mesh = np.vstack([valid_x, valid_x])
-                 Y_mesh = np.vstack([valid_y, valid_y])
-                 Z_mesh = np.vstack([valid_z, np.full_like(valid_z, z_min)])
                  
-                 # 3. Plot Surface
-                 # color='#1A1A1A' -> Subtle dark grey support
-                 # alpha=0.3 -> See-through
-                 # rstride=1, cstride=50 -> Draw a vertical line every ~50 points ( optimization & visual style)
-                 curtain = self.ax.plot_surface(X_mesh, Y_mesh, Z_mesh, 
-                                      color='#1A1A1A', alpha=0.3, 
-                                      shade=True, antialiased=True,
-                                      rstride=1, cstride=100) # cstride controls vertical line density
+                 # 2. Optimized "Curtain" (Vertical Lines via NaN separators)
+                 # Structure: [x1, x1, nan, x2, x2, nan, ...]
+                 # This draws vertical lines from Track to Base efficiently as one Line object.
                  
-                 # Optional: Add wireframe edges for "vertical lines" look if plot_surface is too smooth
-                 # But plot_surface with cstride usually gives that grid look automatically if edge color is default.
+                 # Create interleaved arrays
+                 # We need to stack (Top, Base, Nan)
                  
+                 # Top Points
+                 xt = x_mesh_data
+                 yt = y_mesh_data
+                 zt = z_mesh_data
+                 
+                 # Base Points
+                 xb = x_mesh_data
+                 yb = y_mesh_data
+                 zb = np.full_like(z_mesh_data, z_min)
+                 
+                 # NaNs
+                 xn = np.full_like(xt, np.nan)
+                 yn = np.full_like(yt, np.nan)
+                 zn = np.full_like(zt, np.nan)
+                 
+                 # Stack and Flatten: (3, N) -> (3N,)
+                 # We want column-wise stacking: [x1, x1, nan], [x2, x2, nan]...
+                 # So we rely on 'F' (Fortran) order flattening or specific reshape
+                 
+                 # Stack: [[x1, x2...], [x1, x2...], [nan, nan...]]
+                 # Flatten 'F' gives: x1, x1, nan, x2, x2, nan...
+                 
+                 X_lines = np.vstack([xt, xb, xn]).flatten(order='F')
+                 Y_lines = np.vstack([yt, yb, yn]).flatten(order='F')
+                 Z_lines = np.vstack([zt, zb, zn]).flatten(order='F')
+                 
+                 # 3. Plot Single Line Collection
+                 # CONTRAST FIX: #1C1C1C (Very subtle, just above background #121212)
+                 self.ax.plot(X_lines, Y_lines, Z_lines, 
+                              color='#1C1C1C', alpha=0.4, linewidth=1)
+                 
+                 # 4. Plot Downsampled Track Line
+                 self.ax.plot(valid_x[::step_line], valid_y[::step_line], valid_z[::step_line], 
+                              color='#333333', linewidth=4, alpha=0.5)
+
              except Exception as e:
                  print(f"3D Curtain Error: {e}")
-
-             self.ax.plot(ref_x[mask], ref_y[mask], ref_z[mask], color='#333333', linewidth=4, alpha=0.5)
+                 # Fallback
+                 self.ax.plot(ref_x[mask], ref_y[mask], ref_z[mask], color='#333333', linewidth=4, alpha=0.5)
         else:
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
@@ -975,8 +1087,15 @@ class RaceReplayerApp(ctk.CTk):
         if use_3d:
              self.ax.set_zlim(min_z, max_z)
              # Set view
-             self.ax.view_init(elev=30, azim=-60)
+             self.ax.view_init(elev=self.cam_elev, azim=self.cam_azim) # Use stored camera pos
              self.ax.set_box_aspect((1, 1, 0.2)) # Flatter Z
+             self.ax.set_axis_off() # Cleaner look
+             
+             # DISABLE DEFAULT NAV to let our custom physics handler work
+             self.ax.finish_resize = lambda: None # Monkeypatch to prevent resets if needed, but set_navigate is key
+             # Let's try explicit disable:
+             try: self.fig.canvas.toolbar.set_cursor(1) # Reset cursor?
+             except: pass
         else:
              self.ax.set_aspect('equal')
              
@@ -1421,8 +1540,14 @@ class RaceReplayerApp(ctk.CTk):
             
             return artists
 
+        # Determine Blit Setting dynamically
+        raw_3d = self.is_3d_mode.get()
+        is_3d = (str(raw_3d) == "1" or str(raw_3d).lower() == "on" or raw_3d is True)
+        use_blit = not is_3d
+        print(f"[DEBUG] Animation Start: 3D={is_3d}, Blit={use_blit}")
+
         self.anim = FuncAnimation(self.fig, update, frames=(total_frames - start_frame) // step_frames, 
-                                  interval=base_interval, blit=True, repeat=False)
+                                  interval=base_interval, blit=use_blit, repeat=False)
         self.canvas.draw()
 
 if __name__ == "__main__":
