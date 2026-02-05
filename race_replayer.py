@@ -855,6 +855,35 @@ class RaceReplayerApp(ctk.CTk):
         mask = ~np.isnan(ref_x)
         
         if use_3d:
+             # --- 3D CURTAIN EFFECT ---
+             try:
+                 # 1. Prepare Data
+                 valid_x, valid_y, valid_z = ref_x[mask], ref_y[mask], ref_z[mask]
+                 
+                 # Base Level (Drop 20m below lowest point for dramatic effect / clearance)
+                 z_min = np.min(valid_z) - 20 
+                 
+                 # 2. Create Mesh for "Ribbon"
+                 # We create a 2xN grid. Top row = Track Z, Bottom row = Base Z
+                 X_mesh = np.vstack([valid_x, valid_x])
+                 Y_mesh = np.vstack([valid_y, valid_y])
+                 Z_mesh = np.vstack([valid_z, np.full_like(valid_z, z_min)])
+                 
+                 # 3. Plot Surface
+                 # color='#1A1A1A' -> Subtle dark grey support
+                 # alpha=0.3 -> See-through
+                 # rstride=1, cstride=50 -> Draw a vertical line every ~50 points ( optimization & visual style)
+                 curtain = self.ax.plot_surface(X_mesh, Y_mesh, Z_mesh, 
+                                      color='#1A1A1A', alpha=0.3, 
+                                      shade=True, antialiased=True,
+                                      rstride=1, cstride=100) # cstride controls vertical line density
+                 
+                 # Optional: Add wireframe edges for "vertical lines" look if plot_surface is too smooth
+                 # But plot_surface with cstride usually gives that grid look automatically if edge color is default.
+                 
+             except Exception as e:
+                 print(f"3D Curtain Error: {e}")
+
              self.ax.plot(ref_x[mask], ref_y[mask], ref_z[mask], color='#333333', linewidth=4, alpha=0.5)
         else:
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
