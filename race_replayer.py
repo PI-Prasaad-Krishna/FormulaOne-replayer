@@ -1367,22 +1367,29 @@ class RaceReplayerApp(ctk.CTk):
                  self.last_logged_lap = current_lap_num
             
             # Update Session Info (Weather & Status) - Every 1 second (approx 5 frames)
-            if frame_idx % 5 == 0:
-                try:
-                    current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
-                    
-                    # Weather
-                    if self.weather_data is not None:
-                        # Find closest weather row before current time
-                        w_row = self.weather_data[self.weather_data['Time'] <= current_session_time].iloc[-1]
+            # Update Session Info (Weather & Status)
+            # Optimized: Run every frame but use fast binary search
+            try:
+                current_session_time = pd.Timedelta(seconds=(current_race_time + self.global_start_time))
+                
+                # Weather (Keep slower update for weather as it changes slowly)
+                if frame_idx % 60 == 0 and self.weather_data is not None:
+                    # Find closest weather row before current time
+                    # bisect_right returns insertion point to maintain order, -1 gives the last valid entry
+                    w_idx = self.weather_data['Time'].searchsorted(current_session_time, side='right') - 1
+                    if w_idx >= 0:
+                        w_row = self.weather_data.iloc[w_idx]
                         air_temp = w_row['AirTemp']
                         humidity = w_row['Humidity']
                         self.weather_lbl.configure(text=f"Air: {air_temp}°C | Hum: {humidity}%")
+                
+                # Track Status (Instant Update)
+                if self.track_status_data is not None:
+                     # Binary Search for fast lookup
+                    ts_idx = self.track_status_data['Time'].searchsorted(current_session_time, side='right') - 1
                     
-                    # Track Status
-                    if self.track_status_data is not None:
-                        # Status is often '1' (Green), '2' (Yellow), '4' (SC), '5' (Red), '6' (VSC), '7' (VSC ending)
-                        ts_row = self.track_status_data[self.track_status_data['Time'] <= current_session_time].iloc[-1]
+                    if ts_idx >= 0:
+                        ts_row = self.track_status_data.iloc[ts_idx]
                         status_code = ts_row['Status']
                         
                         status_text = "GREEN"
@@ -1393,7 +1400,7 @@ class RaceReplayerApp(ctk.CTk):
                             status_color = "#2CC985"
                         elif status_code == '2':
                             status_text = "YELLOW"
-                            status_color = "#E10600" # Reddish for visibility (or yellow)
+                            status_color = "#FFFF00" # Explicit Yellow
                         elif status_code == '4':
                             status_text = "SC"
                             status_color = "orange"
@@ -1405,8 +1412,9 @@ class RaceReplayerApp(ctk.CTk):
                             status_color = "red"
                             
                         self.track_status_lbl.configure(text=f"TRACK: {status_text}", text_color=status_color)
-                        
-                except: pass
+            except Exception as e:
+                # print(f"Status Error: {e}")
+                pass
 
             # Update Leaderboard (Every frame for smoothness)
             if frame_idx % 1 == 0:

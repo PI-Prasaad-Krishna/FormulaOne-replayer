@@ -13,16 +13,19 @@ This project provides a comprehensive set of tools for F1 data analysis, accessi
 
 ### 🏁 Race Replayer (Modern Edition)
 -   **Full Race Animation**: Smooth 20-driver playback with interpolated positions.
+-   **3D View**:
+    -   **Soft Camera**: Physics-based navigation with inertia and smooth damping.
+    -   **Ghost Curtain**: Subtle elevation visualization for track depth without visual clutter.
+    -   **Optimized Rendering**: Smart blitting logic ensures silky smooth rotation even at 60FPS.
+-   **Zero-Flicker Leaderboard**: High-performance UI with state caching for instant, jitter-free updates.
 -   **Playback Control**: Pause, Resume, and adjustable speeds (1x–50x).
--   **Live Leaderboard**: Real-time position tracking with gap intervals.
 -   **Tyre Strategy**: Visual indicator of current tyre compounds for each driver.
--   **Pit Lane Status**: Visual cues for drivers in the pit lane. (working on it)
 -   **Session Info**: Displays real-time track status (SC, VSC, Red Flag) and weather conditions.
--   **Movement Detection**: Automatically detects the race start to skip pre-race waiting times.
+-   **Smart Movement Detection**: Automatically detects the race start to skip pre-race waiting times.
 
 ### 📊 Analytics Dashboard
 -   **Telemetry Battle**: Head-to-head speed and throttle/brake trace comparison.
--   **Race Strategy**: Visualize lap time evolution and tyre history stinsts.
+-   **Race Strategy**: Visualize lap time evolution and tyre history stints.
 -   **Race Lines**: Compare driver racing lines on a realistic track surface with apex visualization.
 -   **Tyre Degradation**: Analyze lap time drop-off vs. tyre age.
 -   **Driver DNA**: Radar charts comparing drivers on Quali Pace, Race Pace, Consistency, and Tyre Management.
@@ -64,6 +67,7 @@ cd "F1 Visulaizer"
 3.  **In the Apps**:
     -   Enter the **Year** (e.g., `2023`) and **Circuit** (e.g., `Abu Dhabi`).
     -   For comparisons, enter driver abbreviations (e.g., `VER` vs `HAM`).
+    -   **3D Controls**: Drag to rotate (with inertia), Scroll to zoom.
 
 ## Troubleshooting
 
