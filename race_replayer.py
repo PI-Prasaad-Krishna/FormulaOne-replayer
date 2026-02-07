@@ -1024,7 +1024,8 @@ class RaceReplayerApp(ctk.CTk):
             
             # Text in 3D
             if use_3d:
-                 text = self.ax.text(0, 0, 0, driver, color=color, fontsize=8, fontweight='bold')
+                 # FIX: Enable clipping to prevent text from bleeding into HUD during zoom
+                 text = self.ax.text(0, 0, 0, driver, color=color, fontsize=8, fontweight='bold', clip_on=True)
             else:
                  text = self.ax.text(0, 0, driver, color=color, fontsize=9, fontweight='bold', clip_on=True, 
                                 bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', pad=1))
@@ -1077,9 +1078,9 @@ class RaceReplayerApp(ctk.CTk):
         valid_z = ref_z[mask]
         
         # Store bounds for zooming
-        min_x, max_x = np.min(valid_x) - 500, np.max(valid_x) + 500
-        min_y, max_y = np.min(valid_y) - 500, np.max(valid_y) + 500
-        min_z, max_z = np.min(valid_z) - 50, np.max(valid_z) + 50
+        min_x, max_x = np.min(valid_x) - 100, np.max(valid_x) + 100
+        min_y, max_y = np.min(valid_y) - 100, np.max(valid_y) + 100
+        min_z, max_z = np.min(valid_z) - 20, np.max(valid_z) + 20
         
         self.plot_bounds = (min_x, max_x, min_y, max_y, min_z, max_z)
         self.zoom_level = 1.0
@@ -1088,7 +1089,25 @@ class RaceReplayerApp(ctk.CTk):
              self.ax.set_zlim(min_z, max_z)
              # Set view
              self.ax.view_init(elev=self.cam_elev, azim=self.cam_azim) # Use stored camera pos
-             self.ax.set_box_aspect((1, 1, 0.2)) # Flatter Z
+             self.ax.dist = 8 # Move camera closer (Default ~10) to fill screen
+             
+             # DYNAMIC ASPECT RATIO FIX:
+             # Previous (1, 1, 0.2) forced a square box even if track was long/thin.
+             # Now we calculate the ratio so it fills the screen.
+             x_range = max_x - min_x
+             y_range = max_y - min_y
+             
+             # Maximize relative to the longest side
+             max_range = max(x_range, y_range)
+             x_ratio = x_range / max_range
+             y_ratio = y_range / max_range
+             
+             print(f"[DEBUG] Aspect Ratio: L={x_range:.0f} W={y_range:.0f} -> ({x_ratio:.2f}, {y_ratio:.2f})")
+             
+             # Flatten Z (0.2 is generic, maybe scale it too?)
+             # 0.2 is usually fine for track elevation vs length
+             self.ax.set_box_aspect((x_ratio, y_ratio, 0.2)) 
+             
              self.ax.set_axis_off() # Cleaner look
              
              # DISABLE DEFAULT NAV to let our custom physics handler work
