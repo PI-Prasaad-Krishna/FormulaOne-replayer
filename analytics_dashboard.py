@@ -1324,12 +1324,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        # REMOVED 3D Toggle Switch
         
-        # Auto-load Track Info
-        self.after(100, self.plot_track_info)
+        self.track_frame = ctk.CTkFrame(self.content_area, fg_color="#121212")
+        self.track_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        self.add_placeholder_plot("Track Map Area")
 
     def plot_track_info(self):
-        """ Plot Track Map with Sectors, Corners, and Elevation Info """
+        """ Plot High-Quality 2D Track Map (Double Line Style) """
         session_type = self.track_session_var.get()
         session = self.load_session(session_type)
         if not session: return
@@ -1338,206 +1341,137 @@ class AnalyticsDashboardApp(ctk.CTk):
             lap = session.laps.pick_fastest()
             tel = lap.get_telemetry()
             
-            # 1. Get Coordinates & Data
             x = np.array(tel['X'].values)
             y = np.array(tel['Y'].values)
-            z = np.array(tel['Z'].values)
             drs = tel['DRS'].to_numpy() # 0=Off, 1=?, 8+=On
             
-            # --- NORMALIZATION & SMOOTHING ---
-            # Elevation is often noisy or absolute. Normalize to lowest point = 0
-            from scipy.ndimage import gaussian_filter1d
-            z_smooth = gaussian_filter1d(z, sigma=10) # Heavy smoothing for clean curtain/elevation
-            
-            z_min_val = z_smooth.min()
-            z = z - z_min_val # Shift original relative to 0
-            z_smooth = z_smooth - z_min_val # Shift smoothed
-            
-            # Use smoothed Z for map geometry to look cleaner
-            z_map = z_smooth 
-            
-            # 2. Calculate Sector Cuts
+            # 2. Sector Calculations
             start_time = lap['LapStartTime']
             s1_end_time = start_time + lap['Sector1Time']
             s2_end_time = s1_end_time + lap['Sector2Time']
             
             times = tel['Time']
-            idx_s1_label = (times - s1_end_time).abs().idxmin()
-            idx_s2_label = (times - s2_end_time).abs().idxmin()
+            idx_s1 = tel.index.get_loc((times - s1_end_time).abs().idxmin())
+            idx_s2 = tel.index.get_loc((times - s2_end_time).abs().idxmin())
             
-            idx_s1 = tel.index.get_loc(idx_s1_label)
-            idx_s2 = tel.index.get_loc(idx_s2_label)
-            
-            # 3. Prepare Plot
-            use_3d = self.track_3d_var.get()
-            
+            # Clear previous
             for widget in self.track_frame.winfo_children(): widget.destroy()
             
-            # Zone Logic
+            # Zone Name
             year_val = 2023
-            try:
-                year_val = int(self.year_var.get())
+            try: year_val = int(self.year_var.get())
             except: pass
+            zone_label = "Overtake Zone" if year_val >= 2026 else "DRS Zone"
             
-            zone_label = "DRS Zone"
-            if year_val >= 2026:
-                zone_label = "Overtake Zone"
+            # --- 2D PLOT SETUP ---
+            fig, ax = plt.subplots(figsize=(10, 7), facecolor='black')
+            ax.set_facecolor('black')
             
-            if use_3d:
-                # --- 3D VIEW (INTERACTIVE) ---
-                fig = plt.figure(figsize=(10, 7), facecolor='#121212') 
-                ax = fig.add_subplot(111, projection='3d')
-                ax.set_facecolor('#121212')
-                
-                self.track_ax = ax
-                
-                # A. Curtain Effect
-                # Use Smoothed data for nicer curtain
-                step = 5
-                xt, yt, zt = x[::step], y[::step], z_map[::step]
-                
-                # Base relative to new normalized Z
-                # If lowest is 0, base can be -10
-                base_depth = 20
-                zb = np.full_like(zt, -base_depth)
-                xn = np.full_like(xt, np.nan)
-                
-                # Stack Lines
-                X_l = np.vstack([xt, xt, xn]).flatten('F')
-                Y_l = np.vstack([yt, yt, xn]).flatten('F')
-                Z_l = np.vstack([zt, zb, xn]).flatten('F')
-                
-                ax.plot(X_l, Y_l, Z_l, color='#222222', alpha=0.5, linewidth=1)
-                
-                # B. Main Track Line
-                ax.plot(x, y, z_map, color='#444444', linewidth=4, alpha=0.8, label='Track')
-                
-                # C. Zones (Green)
-                drs_active = drs > 8
-                drs_x = x.copy(); drs_y = y.copy(); drs_z = z_map.copy()
-                drs_x[~drs_active] = np.nan
-                drs_y[~drs_active] = np.nan
-                drs_z[~drs_active] = np.nan
-                
-                ax.plot(drs_x, drs_y, drs_z, color='#00FF00', linewidth=5, label=zone_label)
-                
-                # D. Sector Dividers (Vertical Posts)
-                def draw_divider(idx, label):
-                    lx, ly, lz = x[idx], y[idx], z_map[idx]
-                    # Post from base to slightly above track
-                    ax.plot([lx, lx], [ly, ly], [-base_depth, lz + 10], color='white', linestyle='-', linewidth=2)
-                    # Label
-                    ax.text(lx, ly, lz + 20, label, color='white', fontsize=10, fontweight='bold', ha='center', 
-                            bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', pad=1))
-                    
-                draw_divider(idx_s1, "S1 | S2")
-                draw_divider(idx_s2, "S2 | S3")
-                draw_divider(0, "FINISH")
-                
-                # E. Elevation Labels (Peaks/Troughs)
-                from scipy.signal import find_peaks
-                # Find peaks in smoothed data but label with values
-                peaks, _ = find_peaks(z_map, distance=800, prominence=15)
-                troughs, _ = find_peaks(-z_map, distance=800, prominence=15)
-                
-                for p in peaks:
-                    # Show value relative to base (already normalized)
-                    # Maybe show delta from mean? Or just absolute height from lowest point.
-                    val = z_map[p]
-                    ax.text(x[p], y[p], z_map[p]+10, f"+{val:.0f}m", color='#FFA500', fontsize=9, ha='center', fontweight='bold')
-                    ax.scatter([x[p]], [y[p]], [z_map[p]], color='#FFA500', s=30)
-                    
-                for t in troughs:
-                    val = z_map[t]
-                    ax.text(x[t], y[t], z_map[t]-10, f"+{val:.0f}m", color='#00FFFF', fontsize=9, ha='center', fontweight='bold')
-                    ax.scatter([x[t]], [y[t]], [z_map[t]], color='#00FFFF', s=30)
-
-                # F. Corners
-                if hasattr(session, 'circuit_info'):
-                    corners = session.circuit_info.corners
-                    for _, corner in corners.iterrows():
-                        cx, cy = corner['X'], corner['Y']
-                        dists = np.sqrt((x - cx)**2 + (y - cy)**2)
-                        nearest_idx = dists.argmin()
-                        cz = z_map[nearest_idx]
-                        
-                        ax.text(cx, cy, cz + 5, f"{corner['Number']}", color='#888888', fontsize=8, ha='center', va='center')
-
-                # Axes & Aspect
-                ax.set_axis_off()
-                
-                self.plot_bounds = (x.min(), x.max(), y.min(), y.max(), -base_depth, z_map.max())
-                
-                range_x = x.max() - x.min()
-                range_y = y.max() - y.min()
-                max_xy = max(range_x, range_y)
-                
-                x_ratio = range_x / max_xy
-                y_ratio = range_y / max_xy
-                
-                # Z ratio: Track height vs Length. 
-                # If track is 5km long and elev change is 40m, 1:1 scale makes z flat.
-                # We exaggerate Z for visibility.
-                ax.set_box_aspect((x_ratio, y_ratio, 0.2)) # 0.2 is the exaggeration
-                
-                ax.view_init(elev=self.cam_elev, azim=self.cam_azim)
-                ax.set_title(f"Track Info - {session.event.EventName} ({year_val})", color="#777777")
-                
-                canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
-                self.track_canvas = canvas
-                canvas.get_tk_widget().pack(fill="both", expand=True)
-                canvas.draw()
-                
-                # Bindings
-                tk_canvas = canvas.get_tk_widget()
-                tk_canvas.bind("<ButtonPress-1>", self.on_cam_press)
-                tk_canvas.bind("<B1-Motion>", self.on_cam_drag)
-                tk_canvas.bind("<ButtonRelease-1>", self.on_cam_release)
-                canvas.mpl_connect('scroll_event', self.on_scroll)
-                
-            else:
-                # 2D View
-                fig, ax = plt.subplots(figsize=(8, 6), facecolor='#121212')
-                ax.set_facecolor='#121212'
-                
-                ax.plot(x, y, color='#444444', linewidth=4, label='Track')
-                
-                # Zones
-                drs_active = drs > 8
+            # Remove Margins to maximize map size
+            plt.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.02)
+            
+            # --- TRACK STYLE: DOUBLE LINE ---
+            # 1. Outer Border (Grey)
+            ax.plot(x, y, color='#AAAAAA', linewidth=10, zorder=1)
+            
+            # 2. Inner Fill (Black)
+            ax.plot(x, y, color='black', linewidth=6, zorder=2)
+            
+            # --- ZONES (DRS/Overtake) ---
+            # Green "In-fill" ON TOP of black fill
+            drs_active = drs > 8
+            if drs_active.sum() > 0:
                 drs_x = x.copy(); drs_y = y.copy()
                 drs_x[~drs_active] = np.nan
                 drs_y[~drs_active] = np.nan
-                ax.plot(drs_x, drs_y, color='#00FF00', linewidth=5, label=zone_label)
                 
-                # Sectors
-                def draw_divider_2d(idx, label):
-                    lx, ly = x[idx], y[idx]
-                    ax.scatter([lx], [ly], color='white', s=80, marker='s')
-                    ax.text(lx, ly, "  " + label, color='white', fontsize=10, fontweight='bold', va='center')
+                # Plot GREEN on top of black fill (zorder=3)
+                # Width 5 fits inside 6, but let's match it (6) or go slightly thinner (4)
+                # If zorder=3, it overlays black.
+                ax.plot(drs_x, drs_y, color='#00FF00', linewidth=5, label=zone_label, zorder=3)
+            
+            # --- SECTOR MARKINGS (Clean with Offset) ---
+            def draw_sector_marker(idx, label, color='white', offset=(20, 20)):
+                lx, ly = x[idx], y[idx]
                 
-                draw_divider_2d(idx_s1, "S1")
-                draw_divider_2d(idx_s2, "S2")
-                draw_divider_2d(0, "FINISH")
+                # 1. MARKER on track
+                ax.scatter([lx], [ly], color='white', s=60, marker='s', zorder=4, edgecolor='black', linewidth=1)
                 
-                if hasattr(session, 'circuit_info'):
-                     corners = session.circuit_info.corners
-                     for _, corner in corners.iterrows():
-                         ax.text(corner['X'], corner['Y'], f"{corner['Number']}", color='#888888', fontsize=8, ha='center', va='center')
-                
-                ax.axis('off')
-                ax.set_aspect('equal')
+                # 2. LABEL with Arrow pointing to marker
+                # Use annotate to place text away from track
+                ax.annotate(label, 
+                            xy=(lx, ly), 
+                            xytext=offset, 
+                            textcoords='offset points',
+                            color=color, fontsize=10, fontweight='bold',
+                            ha='center', va='center', zorder=5,
+                            arrowprops=dict(facecolor=color, arrowstyle="-", linewidth=1.5),
+                            bbox=dict(facecolor='black', edgecolor=color, boxstyle='round,pad=0.2', alpha=0.8))
 
-                ax.legend(facecolor='#333', labelcolor='white')
-                
-                canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
-                canvas.get_tk_widget().pack(fill="both", expand=True)
-                canvas.draw()
+            # Offsets can be dynamic, but fixed is safer than overlapping track.
+            # Try to push them "outwards".
+            # For now, distinct offsets.
+            draw_sector_marker(0, "FINISH", color='#FFFFFF', offset=(30, 0))
+            draw_sector_marker(idx_s1, "S1", color='#FFD700', offset=(-30, 30))
+            draw_sector_marker(idx_s2, "S2", color='#FFD700', offset=(30, -30))
+            
+            # --- CORNER NUMBERS ---
+            # Keep them on track or slightly off? On track is standard.
+            if hasattr(session, 'circuit_info'):
+                try:
+                    corners = session.circuit_info.corners
+                    for _, corner in corners.iterrows():
+                        ax.text(corner['X'], corner['Y'], f"{corner['Number']}", 
+                                color='#888888', fontsize=7, ha='center', va='center', fontweight='bold', zorder=2.5)
+                except: pass
+
+            # Layout
+            ax.axis('off')
+            ax.set_aspect('equal')
+            ax.set_title(f"{session.event.EventName} - Track Map ({year_val})", color='white', fontsize=12)
+            
+            # Legend
+            if drs_active.sum() > 0:
+                leg = ax.legend(facecolor='black', edgecolor='#444', loc='upper right', fontsize=8)
+                for text in leg.get_texts(): text.set_color("white")
+            
+            # Embed
+            canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
+            self.track_canvas = canvas
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas.draw()
             
         except Exception as e:
-            messagebox.showerror("Error", f"Track Info Error: {e}")
-            print(e)
+            print(f"Track Info Error: {e}")
             import traceback
             traceback.print_exc()
+
+    def create_track_info_page(self):
+        # Header
+        ctk.CTkLabel(self.content_area, text="Detailed Track Info", font=("Arial", 24, "bold")).pack(pady=10)
+        
+        controls = ctk.CTkFrame(self.content_area)
+        controls.pack(pady=10)
+        
+        self.track_session_var = ctk.StringVar(value="Race")
+        ctk.CTkOptionMenu(controls, variable=self.track_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=5)
+        
+        self.year_var = ctk.StringVar(value="2023")  
+        
+        ctk.CTkButton(controls, text="Generate Map", command=self.plot_track_info, fg_color="#3498DB").pack(side="left", padx=10)
+        
+        self.track_frame = ctk.CTkFrame(self.content_area, fg_color="#121212")
+        self.track_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Placeholder
+        fig, ax = plt.subplots(figsize=(8, 5), facecolor='#121212')
+        ax.set_facecolor('#121212')
+        ax.text(0.5, 0.5, "Select Session & Click Generate", color='gray', ha='center', va='center', fontsize=14)
+        ax.axis('off')
+        
+        canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=20, pady=20)
+        canvas.draw()
 
 if __name__ == "__main__":
     import sys
