@@ -1332,8 +1332,9 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.add_placeholder_plot("Track Map Area")
 
     def plot_track_info(self):
-        """ Plot High-Quality 2D Track Map (Double Line Style) """
-        session_type = self.track_session_var.get()
+        """ Plot Color-Coded 2D Track Map (S1=Red, S2=Blue, S3=Yellow) """
+        # Default to Race as requested ("solely track info")
+        session_type = "Race"
         session = self.load_session(session_type)
         if not session: return
         
@@ -1343,16 +1344,23 @@ class AnalyticsDashboardApp(ctk.CTk):
             
             x = np.array(tel['X'].values)
             y = np.array(tel['Y'].values)
-            drs = tel['DRS'].to_numpy() # 0=Off, 1=?, 8+=On
             
-            # 2. Sector Calculations
-            start_time = lap['LapStartTime']
-            s1_end_time = start_time + lap['Sector1Time']
-            s2_end_time = s1_end_time + lap['Sector2Time']
-            
+            # --- SECTOR INDICES ---
+            # Using Lap Time logic (confirmed correct)
+            t_s1 = lap['Sector1Time']
+            t_s2 = t_s1 + lap['Sector2Time']
             times = tel['Time']
-            idx_s1 = tel.index.get_loc((times - s1_end_time).abs().idxmin())
-            idx_s2 = tel.index.get_loc((times - s2_end_time).abs().idxmin())
+            
+            # Get integer indices
+            idx_s1 = (times - t_s1).abs().idxmin()
+            idx_s2 = (times - t_s2).abs().idxmin()
+            loc_s1 = tel.index.get_loc(idx_s1)
+            loc_s2 = tel.index.get_loc(idx_s2)
+            
+            # Helper to slice (ensure continuity)
+            # S1: Start -> loc_s1
+            # S2: loc_s1 -> loc_s2
+            # S3: loc_s2 -> End
             
             # Clear previous
             for widget in self.track_frame.winfo_children(): widget.destroy()
@@ -1363,77 +1371,145 @@ class AnalyticsDashboardApp(ctk.CTk):
             except: pass
             zone_label = "Overtake Zone" if year_val >= 2026 else "DRS Zone"
             
-            # --- 2D PLOT SETUP ---
+            # --- PLOT SETUP ---
             fig, ax = plt.subplots(figsize=(10, 7), facecolor='black')
             ax.set_facecolor('black')
-            
-            # Remove Margins to maximize map size
             plt.subplots_adjust(left=0.02, right=0.98, top=0.92, bottom=0.02)
             
-            # --- TRACK STYLE: DOUBLE LINE ---
-            # 1. Outer Border (Grey)
-            ax.plot(x, y, color='#AAAAAA', linewidth=10, zorder=1)
+            # --- LAYER 1: BORDER (White/Grey) ---
+            # Wideness creates the border effect
+            ax.plot(x, y, color='#DDDDDD', linewidth=12, zorder=1)
             
-            # 2. Inner Fill (Black)
-            ax.plot(x, y, color='black', linewidth=6, zorder=2)
+            # --- LAYER 2: SECTORS (Colored Fill) ---
+            # Width=8 (leaving ~2px border on each side)
             
-            # --- ZONES (DRS/Overtake) ---
-            # Green "In-fill" ON TOP of black fill
-            drs_active = drs > 8
-            if drs_active.sum() > 0:
+            # Sector 1 (Red)
+            ax.plot(x[:loc_s1+1], y[:loc_s1+1], color='#FF3333', linewidth=7, zorder=2, label='Sector 1')
+            
+            # Sector 2 (Blue)
+            # Overlap slightly (+1/-1?) to avoid gaps
+            ax.plot(x[loc_s1:loc_s2+1], y[loc_s1:loc_s2+1], color='#3399FF', linewidth=7, zorder=2, label='Sector 2')
+            
+            # Sector 3 (Yellow)
+            ax.plot(x[loc_s2:], y[loc_s2:], color='#FFFF33', linewidth=7, zorder=2, label='Sector 3')
+            
+            # --- LAYER 3: DRS ZONES (Green Overlay) ---
+            drs_plotted = False
+            # Try Circuit Info first
+            drs_segments = []
+            
+            if hasattr(session, 'circuit_info'):
+                # Not readily usable for geometry without mapping distance -> x,y
+                pass
+            
+            # Telemetry Fallback
+            drs = tel['DRS'].to_numpy() # 0=Off, 1=?, 8+=On
+            if drs.max() > 8:
+                drs_active = drs > 8
                 drs_x = x.copy(); drs_y = y.copy()
                 drs_x[~drs_active] = np.nan
                 drs_y[~drs_active] = np.nan
                 
-                # Plot GREEN on top of black fill (zorder=3)
-                # Width 5 fits inside 6, but let's match it (6) or go slightly thinner (4)
-                # If zorder=3, it overlays black.
-                ax.plot(drs_x, drs_y, color='#00FF00', linewidth=5, label=zone_label, zorder=3)
+                # Plot Bright Green on top of sectors
+                ax.plot(drs_x, drs_y, color='#00FF00', linewidth=4, zorder=3, label=zone_label)
+                drs_plotted = True
             
-            # --- SECTOR MARKINGS (Clean with Offset) ---
-            def draw_sector_marker(idx, label, color='white', offset=(20, 20)):
-                lx, ly = x[idx], y[idx]
+            # --- SECTOR DIVIDERS (White Lines, No Label) ---
+            def draw_divider(idx):
+                # Tangent/Perpendicular Logic
+                prev = max(0, idx-5)
+                nxt = min(len(x)-1, idx+5)
+                dx, dy = x[nxt]-x[prev], y[nxt]-y[prev]
+                mag = np.sqrt(dx*dx+dy*dy)
+                if mag==0: return
+                px, py = -dy/mag, dx/mag
+                L=300
+                lx = [x[idx]-px*L, x[idx]+px*L]
+                ly = [y[idx]-py*L, y[idx]+py*L]
                 
-                # 1. MARKER on track
-                ax.scatter([lx], [ly], color='white', s=60, marker='s', zorder=4, edgecolor='black', linewidth=1)
-                
-                # 2. LABEL with Arrow pointing to marker
-                # Use annotate to place text away from track
-                ax.annotate(label, 
-                            xy=(lx, ly), 
-                            xytext=offset, 
-                            textcoords='offset points',
-                            color=color, fontsize=10, fontweight='bold',
-                            ha='center', va='center', zorder=5,
-                            arrowprops=dict(facecolor=color, arrowstyle="-", linewidth=1.5),
-                            bbox=dict(facecolor='black', edgecolor=color, boxstyle='round,pad=0.2', alpha=0.8))
+                ax.plot(lx, ly, color='white', linewidth=2, linestyle='-', zorder=4)
+                        
+            draw_divider(0)      # Finish Line
+            draw_divider(loc_s1) # S1 End
+            draw_divider(loc_s2) # S2 End
 
-            # Offsets can be dynamic, but fixed is safer than overlapping track.
-            # Try to push them "outwards".
-            # For now, distinct offsets.
-            draw_sector_marker(0, "FINISH", color='#FFFFFF', offset=(30, 0))
-            draw_sector_marker(idx_s1, "S1", color='#FFD700', offset=(-30, 30))
-            draw_sector_marker(idx_s2, "S2", color='#FFD700', offset=(30, -30))
+            # --- SECTOR LABELS (Centered in Zone) ---
+            def label_zone(start_idx, end_idx, text, color):
+                # Find midpoint index
+                mid_idx = (start_idx + end_idx) // 2
+                mx, my = x[mid_idx], y[mid_idx]
+                
+                # Add Box
+                ax.text(mx, my, text, color='white', fontsize=10, fontweight='bold', ha='center', va='center', zorder=5,
+                        bbox=dict(facecolor='black', edgecolor=color, boxstyle='round,pad=0.4', linewidth=1.5))
             
-            # --- CORNER NUMBERS ---
-            # Keep them on track or slightly off? On track is standard.
-            if hasattr(session, 'circuit_info'):
+            label_zone(0, loc_s1, "SECTOR 1", '#FF3333')
+            label_zone(loc_s1, loc_s2, "SECTOR 2", '#3399FF')
+            label_zone(loc_s2, len(x)-1, "SECTOR 3", '#FFFF33')
+            
+            # --- CORNER NUMBERS (Bubbles) ---
+            # Robust Corner Loading
+            corners = None
+            
+            # 1. Try current session
+            if hasattr(session, 'circuit_info') and session.circuit_info is not None:
+                corners = session.circuit_info.corners
+            
+            # 2. Try explicit get_circuit_info() if available (some versions)
+            if corners is None and hasattr(session, 'get_circuit_info'):
                 try:
-                    corners = session.circuit_info.corners
-                    for _, corner in corners.iterrows():
-                        ax.text(corner['X'], corner['Y'], f"{corner['Number']}", 
-                                color='#888888', fontsize=7, ha='center', va='center', fontweight='bold', zorder=2.5)
+                    ci = session.get_circuit_info()
+                    if ci is not None: corners = ci.corners
                 except: pass
+                
+            # 3. Fallback: Try Loading 'Qualifying' session if 'Race' has no corners
+            # (User verified Q has data for Abu Dhabi 2023)
+            if corners is None:
+                try:
+                    # Only if we aren't already in Q
+                    if session_type != 'Qualifying':
+                        print("Fetching Qualifying session for Corner Data...")
+                        # We need to create a new session object
+                        # We can use the same event details
+                        q_session = fastf1.get_session(session.event.Year, session.event.EventName, 'Q')
+                        q_session.load(telemetry=False, laps=False, weather=False, messages=False)
+                        if hasattr(q_session, 'circuit_info') and q_session.circuit_info is not None:
+                            corners = q_session.circuit_info.corners
+                except Exception as e:
+                    print(f"Fallback Corner Fetch Failed: {e}")
+
+            if corners is not None:
+                try:
+                    for _, corner in corners.iterrows():
+                        # Black circle with white text
+                        # Ensure X,Y are scalar
+                        cx, cy = corner['X'], corner['Y']
+                        cn = corner['Number']
+                        # Filter out empty numbers/letters if needed?
+                        if str(cn).strip() == "": continue
+                        
+                        ax.scatter([cx], [cy], s=150, color='black', edgecolor='white', zorder=5)
+                        ax.text(cx, cy, f"{cn}", 
+                                color='white', fontsize=7, ha='center', va='center', fontweight='bold', zorder=6)
+                except Exception as e:
+                    print(f"Corner Plot Error: {e}")
 
             # Layout
             ax.axis('off')
             ax.set_aspect('equal')
             ax.set_title(f"{session.event.EventName} - Track Map ({year_val})", color='white', fontsize=12)
             
-            # Legend
-            if drs_active.sum() > 0:
-                leg = ax.legend(facecolor='black', edgecolor='#444', loc='upper right', fontsize=8)
-                for text in leg.get_texts(): text.set_color("white")
+            # Custom Legend
+            from matplotlib.lines import Line2D
+            custom_lines = [Line2D([0], [0], color='#FF3333', lw=4),
+                            Line2D([0], [0], color='#3399FF', lw=4),
+                            Line2D([0], [0], color='#FFFF33', lw=4)]
+            labels = ['Sector 1', 'Sector 2', 'Sector 3']
+            if drs_plotted:
+                custom_lines.append(Line2D([0], [0], color='#00FF00', lw=4))
+                labels.append(zone_label)
+                
+            ax.legend(custom_lines, labels, facecolor='black', edgecolor='#444', loc='upper right', fontsize=8, labelcolor='white')
             
             # Embed
             canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
@@ -1453,8 +1529,8 @@ class AnalyticsDashboardApp(ctk.CTk):
         controls = ctk.CTkFrame(self.content_area)
         controls.pack(pady=10)
         
-        self.track_session_var = ctk.StringVar(value="Race")
-        ctk.CTkOptionMenu(controls, variable=self.track_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=5)
+        # REMOVED Race/Qualifying Selector as requested
+        self.track_session_var = ctk.StringVar(value="Race") # Internal default
         
         self.year_var = ctk.StringVar(value="2023")  
         
@@ -1466,7 +1542,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         # Placeholder
         fig, ax = plt.subplots(figsize=(8, 5), facecolor='#121212')
         ax.set_facecolor('#121212')
-        ax.text(0.5, 0.5, "Select Session & Click Generate", color='gray', ha='center', va='center', fontsize=14)
+        ax.text(0.5, 0.5, "Click Generate Map", color='gray', ha='center', va='center', fontsize=14)
         ax.axis('off')
         
         canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
