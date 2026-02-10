@@ -89,7 +89,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.btn_tyre = ctk.CTkButton(self.sidebar, text="Tyre Degradation", command=lambda: self.show_page("tyre"), fg_color="transparent", border_width=1)
         self.btn_tyre.pack(pady=10, padx=20, fill="x")
         
-        self.btn_track_info = ctk.CTkButton(self.sidebar, text="Track Info (3D)", command=lambda: self.show_page("track_info"), fg_color="transparent", border_width=1)
+        self.btn_track_info = ctk.CTkButton(self.sidebar, text="Track Info", command=lambda: self.show_page("track_info"), fg_color="transparent", border_width=1)
         self.btn_track_info.pack(pady=10, padx=20, fill="x")
 
         # Navigation Buttons Map
@@ -1317,10 +1317,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         ctk.CTkButton(controls, text="Generate Map", command=self.plot_track_info, fg_color="#3498DB").pack(side="left", padx=10)
         
-        # 3D Toggle
-        self.track_3d_var = ctk.BooleanVar(value=True) # Default to 3D for impact
-        self.switch_3d = ctk.CTkSwitch(controls, text="3D View", variable=self.track_3d_var, onvalue=True, offvalue=False, command=self.plot_track_info)
-        self.switch_3d.pack(side="left", padx=20)
+
         
         self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1365,12 +1362,33 @@ class AnalyticsDashboardApp(ctk.CTk):
             # Clear previous
             for widget in self.track_frame.winfo_children(): widget.destroy()
             
-            # Zone Name
-            year_val = 2023
             try: year_val = int(self.year_var.get())
-            except: pass
-            zone_label = "Overtake Zone" if year_val >= 2026 else "DRS Zone"
-            
+            except: year_val = 2023
+            zone_label = "MOM" if year_val >= 2026 else "DRS"
+
+            # --- FORCE LOAD QUALIFYING FOR MAP ---
+            if session_type != 'Qualifying':
+                try:
+                    # Load Q session for map geometry and zones
+                    q_session = fastf1.get_session(year_val, session.event.EventName, 'Q')
+                    q_session.load(telemetry=True, laps=True, weather=False)
+                    session = q_session
+                    # Update lap/tel references
+                    lap = session.laps.pick_fastest()
+                    tel = lap.get_telemetry()
+                    x = np.array(tel['X'].values)
+                    y = np.array(tel['Y'].values)
+                    times = tel['Time']
+                    # Re-calc sector indices for new session data
+                    t_s1 = lap['Sector1Time']
+                    t_s2 = t_s1 + lap['Sector2Time']
+                    idx_s1 = (times - t_s1).abs().idxmin()
+                    idx_s2 = (times - t_s2).abs().idxmin()
+                    loc_s1 = tel.index.get_loc(idx_s1)
+                    loc_s2 = tel.index.get_loc(idx_s2)
+                except Exception as e:
+                    print(f"Could not load Qualifying for Map, using current session: {e}")
+
             # --- PLOT SETUP ---
             fig, ax = plt.subplots(figsize=(10, 7), facecolor='black')
             ax.set_facecolor('black')
@@ -1384,35 +1402,72 @@ class AnalyticsDashboardApp(ctk.CTk):
             # Width=8 (leaving ~2px border on each side)
             
             # Sector 1 (Red)
-            ax.plot(x[:loc_s1+1], y[:loc_s1+1], color='#FF3333', linewidth=7, zorder=2, label='Sector 1')
+            ax.plot(x[:loc_s1+1], y[:loc_s1+1], color='#FF3333', linewidth=8, zorder=2, label='Sector 1')
             
             # Sector 2 (Blue)
             # Overlap slightly (+1/-1?) to avoid gaps
-            ax.plot(x[loc_s1:loc_s2+1], y[loc_s1:loc_s2+1], color='#3399FF', linewidth=7, zorder=2, label='Sector 2')
+            ax.plot(x[loc_s1:loc_s2+1], y[loc_s1:loc_s2+1], color='#3399FF', linewidth=8, zorder=2, label='Sector 2')
             
             # Sector 3 (Yellow)
-            ax.plot(x[loc_s2:], y[loc_s2:], color='#FFFF33', linewidth=7, zorder=2, label='Sector 3')
+            ax.plot(x[loc_s2:], y[loc_s2:], color='#FFFF33', linewidth=8, zorder=2, label='Sector 3')
             
-            # --- LAYER 3: DRS ZONES (Green Overlay) ---
+            # --- LAYER 3: DRS ZONES (Parallel Line + Label) ---
             drs_plotted = False
-            # Try Circuit Info first
-            drs_segments = []
             
-            if hasattr(session, 'circuit_info'):
-                # Not readily usable for geometry without mapping distance -> x,y
-                pass
-            
-            # Telemetry Fallback
-            drs = tel['DRS'].to_numpy() # 0=Off, 1=?, 8+=On
-            if drs.max() > 8:
-                drs_active = drs > 8
-                drs_x = x.copy(); drs_y = y.copy()
-                drs_x[~drs_active] = np.nan
-                drs_y[~drs_active] = np.nan
+            if 'DRS' in tel.columns:
+                drs = tel['DRS'].to_numpy() 
+                drs_active = drs >= 10
                 
-                # Plot Bright Green on top of sectors
-                ax.plot(drs_x, drs_y, color='#00FF00', linewidth=4, zorder=3, label=zone_label)
-                drs_plotted = True
+                # Identify segments
+                drs_segments = []
+                segment_start = None
+                
+                for i in range(len(drs_active)):
+                    if drs_active[i] and segment_start is None:
+                        segment_start = i
+                    elif not drs_active[i] and segment_start is not None:
+                        drs_segments.append((segment_start, i))
+                        segment_start = None
+                if segment_start is not None:
+                    drs_segments.append((segment_start, len(drs_active)-1))
+                
+                for start, end in drs_segments:
+                    # Filter short segments (noise)
+                    if (end - start) < 5: continue
+
+                    # Get segment coords
+                    sx = x[start:end]
+                    sy = y[start:end]
+                    
+                    if len(sx) < 2: continue
+                    
+                    # Calculate normals per point for smooth offset
+                    # Gradient (tangent)
+                    dx = np.gradient(sx)
+                    dy = np.gradient(sy)
+                    mag = np.sqrt(dx*dx + dy*dy)
+                    # Avoid divide by zero
+                    mag[mag == 0] = 1.0
+                    
+                    # Normal (-dy, dx)
+                    nx = -dy / mag
+                    ny = dx / mag
+                    
+                    offset_dist = 300 # Reduced slightly for cleaner look
+                    
+                    # Apply offset
+                    off_x = sx + nx * offset_dist
+                    off_y = sy + ny * offset_dist
+                    
+                    # Draw Line
+                    ax.plot(off_x, off_y, color='#00FF00', linewidth=3, zorder=3)
+                    
+                    # Draw Label
+                    mid = len(sx)//2
+                    mx, my = off_x[mid], off_y[mid]
+                    ax.text(mx, my, zone_label, color='#00FF00', fontsize=10, fontweight='bold', ha='center', va='center')
+                    
+                    drs_plotted = True
             
             # --- SECTOR DIVIDERS (White Lines, No Label) ---
             def draw_divider(idx):
