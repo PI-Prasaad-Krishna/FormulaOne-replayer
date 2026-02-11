@@ -1488,20 +1488,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             draw_divider(loc_s1) # S1 End
             draw_divider(loc_s2) # S2 End
 
-            # --- SECTOR LABELS (Centered in Zone) ---
-            def label_zone(start_idx, end_idx, text, color):
-                # Find midpoint index
-                mid_idx = (start_idx + end_idx) // 2
-                mx, my = x[mid_idx], y[mid_idx]
-                
-                # Add Box
-                ax.text(mx, my, text, color='white', fontsize=10, fontweight='bold', ha='center', va='center', zorder=5,
-                        bbox=dict(facecolor='black', edgecolor=color, boxstyle='round,pad=0.4', linewidth=1.5))
-            
-            label_zone(0, loc_s1, "SECTOR 1", '#FF3333')
-            label_zone(loc_s1, loc_s2, "SECTOR 2", '#3399FF')
-            label_zone(loc_s2, len(x)-1, "SECTOR 3", '#FFFF33')
-            
+
             # --- CORNER NUMBERS (Bubbles) ---
             # Robust Corner Loading
             corners = None
@@ -1560,11 +1547,8 @@ class AnalyticsDashboardApp(ctk.CTk):
                             Line2D([0], [0], color='#3399FF', lw=4),
                             Line2D([0], [0], color='#FFFF33', lw=4)]
             labels = ['Sector 1', 'Sector 2', 'Sector 3']
-            if drs_plotted:
-                custom_lines.append(Line2D([0], [0], color='#00FF00', lw=4))
-                labels.append(zone_label)
-                
-            ax.legend(custom_lines, labels, facecolor='black', edgecolor='#444', loc='upper right', fontsize=8, labelcolor='white')
+
+            ax.legend(custom_lines, labels, facecolor='black', edgecolor='#444', loc='best', fontsize=8, labelcolor='white', framealpha=0.5)
             
             # Embed
             canvas = FigureCanvasTkAgg(fig, master=self.track_frame)
@@ -1587,7 +1571,8 @@ class AnalyticsDashboardApp(ctk.CTk):
         # REMOVED Race/Qualifying Selector as requested
         self.track_session_var = ctk.StringVar(value="Race") # Internal default
         
-        self.year_var = ctk.StringVar(value="2023")  
+        # self.year_var is already defined in __init__
+
         
         ctk.CTkButton(controls, text="Generate Map", command=self.plot_track_info, fg_color="#3498DB").pack(side="left", padx=10)
         
