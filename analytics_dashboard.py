@@ -150,29 +150,59 @@ class AnalyticsDashboardApp(ctk.CTk):
              messagebox.showerror("Error", "Invalid Year")
              return None
              
-        status_lbl = ctk.CTkLabel(self.sidebar, text=f"Loading {session_type} Data...", text_color="orange")
-        status_lbl.pack(side="bottom", pady=10)
-        self.update()
+    def show_loading(self, message="Loading Data..."):
+        """ Display a loading indicator/label safely on the main thread """
+        if hasattr(self, 'loading_lbl') and self.loading_lbl:
+            self.loading_lbl.destroy()
+            
+        self.loading_lbl = ctk.CTkLabel(self.sidebar, text=message, text_color="orange", font=("Roboto", 12, "bold"))
+        self.loading_lbl.pack(side="bottom", pady=10)
+        self.loading_lbl.update() 
+
+    def hide_loading(self):
+        """ Remove loading indicator """
+        if hasattr(self, 'loading_lbl') and self.loading_lbl:
+            self.loading_lbl.destroy()
+            self.loading_lbl = None
+
+    def perform_background_load(self, callback, year, circuit, session_type='R'):
+        """ 
+        Starts a background thread to load the session. 
+        Calls 'callback(session)' on the main thread when done.
+        """
+        self.show_loading(f"Loading {session_type}...")
         
-        try:
-            # Enable Cache
-            if not os.path.exists("f1_cache"): os.makedirs("f1_cache")
-            fastf1.Cache.enable_cache("f1_cache")
-            
-            # Map full name to identifier if needed, but 'Race'/'Qualifying' -> 'R'/'Q'
-            identifier = 'R'
-            if session_type.lower().startswith('q'): identifier = 'Q'
-            elif session_type.lower().startswith('r'): identifier = 'R'
-            else: identifier = session_type # Trace or others
-            
-            session = fastf1.get_session(year, circuit, identifier)
-            session.load(telemetry=True, laps=True, weather=False)
-            status_lbl.destroy()
-            return session
-        except Exception as e:
-             status_lbl.configure(text="Error", text_color="red")
-             print(f"Load Error: {e}")
-             return None
+        def loader_task():
+            try:
+                # Enable Cache (safe to call multiple times)
+                if not os.path.exists("f1_cache"): 
+                    os.makedirs("f1_cache")
+                fastf1.Cache.enable_cache("f1_cache")
+                
+                # Determine Identifier
+                identifier = 'R'
+                if session_type.lower().startswith('q'): identifier = 'Q'
+                elif session_type.lower().startswith('r'): identifier = 'R'
+                else: identifier = session_type 
+                
+                print(f"Loading {year} {circuit} {identifier}...")
+                session = fastf1.get_session(year, circuit, identifier)
+                session.load(telemetry=True, laps=True, weather=False)
+                
+                # Success callback
+                self.after(0, lambda: callback(session))
+                
+            except Exception as e:
+                print(f"Background Load Error: {e}")
+                # Failure callback
+                self.after(0, lambda: self.handle_load_error(str(e)))
+        
+        thread = threading.Thread(target=loader_task, daemon=True)
+        thread.start()
+
+    def handle_load_error(self, error_msg):
+        self.hide_loading()
+        messagebox.showerror("Error", f"Could not load data: {error_msg}")
 
     def get_compound_color_safe(self, compound, session=None):
         """
@@ -206,7 +236,6 @@ class AnalyticsDashboardApp(ctk.CTk):
             "C1": "#f0f0ec", "C2": "#f0f0ec",
             "C3": "#ffd12e", "C4": "#da291c", "C5": "#da291c"
         }
-        # Actually, let's just stick to the basic names as FastF1 usually normalizes them
         return COMPOUND_MAP.get(compound, "white")
 
     def create_telemetry_page(self):
@@ -233,8 +262,21 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.telemetry_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
     def plot_telemetry(self):
-        session_type = self.tel_session_var.get()
-        session = self.load_session(session_type)
+        """ Phase 1: Initiation """
+        try:
+            year = int(self.year_var.get())
+            circuit = self.event_var.get()
+            session_type = self.tel_session_var.get()
+        except:
+            messagebox.showerror("Error", "Invalid Year")
+            return
+
+        # Start Background Load
+        self.perform_background_load(self.finish_plot_telemetry, year, circuit, session_type)
+
+    def finish_plot_telemetry(self, session):
+        """ Phase 2: Completion (Main Thread) """
+        self.hide_loading()
         if not session: return
         
         d1 = self.d1_var.get().upper()
@@ -415,7 +457,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.strategy_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def plot_strategy(self):
-        session = self.load_session()
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_strategy, year, circuit, 'Race')
+
+    def finish_plot_strategy(self, session):
+        self.hide_loading()
         if not session: return
         
         for widget in self.strategy_frame.winfo_children(): widget.destroy()
@@ -515,8 +565,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def plot_gear_map(self):
-        session_type = self.track_session_var.get()
-        session = self.load_session(session_type)
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+             session_type = self.track_session_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_gear_map, year, circuit, session_type)
+
+    def finish_plot_gear_map(self, session):
+        self.hide_loading()
         if not session: return
         
         # Pick fastest lap of the session
@@ -561,9 +619,18 @@ class AnalyticsDashboardApp(ctk.CTk):
 
     def plot_speed_map(self):
         # Similar but Speed
-        session_type = self.track_session_var.get()
-        session = self.load_session(session_type)
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+             session_type = self.track_session_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_speed_map, year, circuit, session_type)
+
+    def finish_plot_speed_map(self, session):
+        self.hide_loading()
         if not session: return
+
         lap = session.laps.pick_fastest()
         tel = lap.get_telemetry()
         
@@ -599,12 +666,24 @@ class AnalyticsDashboardApp(ctk.CTk):
         canvas.draw()
 
     def plot_track_dominance(self):
-        session_type = self.track_session_var.get()
-        session = self.load_session(session_type)
-        if not session: return
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+             session_type = self.track_session_var.get()
+        except: return
         
+        self.perform_background_load(self.finish_plot_track_dominance, year, circuit, session_type)
+
+    def finish_plot_track_dominance(self, session):
+        self.hide_loading()
+        if not session: return
+
         d1 = self.dom_d1_var.get().upper()
         d2 = self.dom_d2_var.get().upper()
+        
+        # We need session_type for the title, let's just infer/get it again or pass it. 
+        # Actually it's cleaner to read from self again since it's on main thread now.
+        session_type = self.track_session_var.get()
         
         try:
             laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
@@ -695,10 +774,18 @@ class AnalyticsDashboardApp(ctk.CTk):
         """
         Visualizes where drivers gained/lost time against each other (Gap Derivative).
         """
-        session_type = self.track_session_var.get()
-        session = self.load_session(session_type)
-        if not session: return
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+             session_type = self.track_session_var.get()
+        except: return
         
+        self.perform_background_load(self.finish_plot_battle_map, year, circuit, session_type)
+
+    def finish_plot_battle_map(self, session):
+        self.hide_loading()
+        if not session: return
+
         d1 = self.dom_d1_var.get().upper()
         d2 = self.dom_d2_var.get().upper()
         
@@ -798,46 +885,63 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.dna_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
     def plot_dna(self):
-        session = self.load_session()
+        """ Phase 1: Initiation """
+        try:
+            year = int(self.year_var.get())
+            circuit = self.event_var.get()
+        except:
+            return
+            
+        self.perform_background_load(self.finish_plot_dna, year, circuit, 'Race')
+
+    def finish_plot_dna(self, session):
+        """ Phase 2: Completion """
+        self.hide_loading()
         if not session: return
         
         drivers = ['VER', 'HAM', 'NOR', 'LEC', 'ALO'] # Compare top 5 for clarity
         
         stats = {'Driver': [], 'Quali': [], 'RacePace': [], 'Consistency': [], 'TyreMgmt': []}
         
-        pole = session.laps.pick_fastest()['LapTime'].total_seconds()
-        
-        for d in drivers:
-            laps = session.laps.pick_drivers(d)
-            if laps.empty: continue
+        try:
+            pole = session.laps.pick_fastest()['LapTime'].total_seconds()
             
-            # Quali (Gap to Pole inverted? Or just raw gap normalized?)
-            # Let's map Gap [0, 2s] to [100, 0]
-            best_lap = laps.pick_fastest()['LapTime'].total_seconds()
-            gap = best_lap - pole
-            quali_score = max(0, 100 - (gap * 50))
+            for d in drivers:
+                laps = session.laps.pick_drivers(d)
+                if laps.empty: continue
+                
+                # Quali (Gap to Pole inverted? Or just raw gap normalized?)
+                # Let's map Gap [0, 2s] to [100, 0]
+                best_lap = laps.pick_fastest()['LapTime'].total_seconds()
+                gap = best_lap - pole
+                quali_score = max(0, 100 - (gap * 50))
             
-            # Race Pace (Avg of quick laps)
-            quick_laps = laps.pick_quicklaps()
-            if quick_laps.empty: continue
-            avg_pace = quick_laps['LapTime'].dt.total_seconds().mean()
-            # Normalize: Pole vs Avg Pace
-            pace_gap = avg_pace - pole
-            pace_score = max(0, 100 - (pace_gap * 20))
-            
-            # Consistency (1 / StdDev)
-            std = quick_laps['LapTime'].dt.total_seconds().std()
-            cons_score = max(0, 100 - (std * 50))
-            
-            # Tyre Mgmt (Avg Stint Length)
-            stints = laps.groupby('Stint')['LapNumber'].count().mean()
-            tyre_score = min(100, stints * 5) # 20 laps avg = 100
-            
-            stats['Driver'].append(d)
-            stats['Quali'].append(quali_score)
-            stats['RacePace'].append(pace_score)
-            stats['Consistency'].append(cons_score)
-            stats['TyreMgmt'].append(tyre_score)
+                # Race Pace (Avg of quick laps)
+                quick_laps = laps.pick_quicklaps()
+                if quick_laps.empty: continue
+                avg_pace = quick_laps['LapTime'].dt.total_seconds().mean()
+                # Normalize: Pole vs Avg Pace
+                pace_gap = avg_pace - pole
+                pace_score = max(0, 100 - (pace_gap * 20))
+                
+                # Consistency (1 / StdDev)
+                std = quick_laps['LapTime'].dt.total_seconds().std()
+                cons_score = max(0, 100 - (std * 50))
+                
+                # Tyre Mgmt (Avg Stint Length)
+                stints = laps.groupby('Stint')['LapNumber'].count().mean()
+                tyre_score = min(100, stints * 5) # 20 laps avg = 100
+                
+                stats['Driver'].append(d)
+                stats['Quali'].append(quali_score)
+                stats['RacePace'].append(pace_score)
+                stats['Consistency'].append(cons_score)
+                stats['TyreMgmt'].append(tyre_score)
+
+        except Exception as e:
+            print(f"DNA Plot Error: {e}")
+            messagebox.showerror("Error", f"Error generating DNA: {e}")
+            return
             
         # Radar Chart
         categories = ['Quali', 'RacePace', 'Consistency', 'TyreMgmt']
@@ -872,7 +976,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.pos_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def plot_position_chart(self):
-        session = self.load_session()
+        try:
+            year = int(self.year_var.get())
+            circuit = self.event_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_position_chart, year, circuit, 'Race')
+
+    def finish_plot_position_chart(self, session):
+        self.hide_loading()
         if not session: return
         
         for widget in self.pos_frame.winfo_children(): widget.destroy()
@@ -1005,7 +1117,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         return x_out, y_out, x_in, y_in
 
     def plot_race_lines(self):
-        session = self.load_session()
+        try:
+            year = int(self.year_var.get())
+            circuit = self.event_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_race_lines, year, circuit, 'Race')
+
+    def finish_plot_race_lines(self, session):
+        self.hide_loading()
         if not session: return
         
         d1 = self.rl_d1_var.get().upper()
@@ -1125,7 +1245,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.tyre_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
     def plot_tyre_degradation(self):
-        session = self.load_session()
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+        except: return
+             
+        self.perform_background_load(self.finish_plot_tyre_degradation, year, circuit, 'Race')
+
+    def finish_plot_tyre_degradation(self, session):
+        self.hide_loading()
         if not session: return
         
         d1 = self.tyre_d1_var.get().upper()
@@ -1332,8 +1460,18 @@ class AnalyticsDashboardApp(ctk.CTk):
         """ Plot Color-Coded 2D Track Map (S1=Red, S2=Blue, S3=Yellow) """
         # Default to Race as requested ("solely track info")
         session_type = "Race"
-        session = self.load_session(session_type)
+        try:
+             year = int(self.year_var.get())
+             circuit = self.event_var.get()
+        except: return
+        
+        self.perform_background_load(self.finish_plot_track_info, year, circuit, session_type)
+
+    def finish_plot_track_info(self, session):
+        self.hide_loading()
         if not session: return
+        
+        session_type = "Race" # Re-declare or pass via args if variable checking logic needed
         
         try:
             lap = session.laps.pick_fastest()
