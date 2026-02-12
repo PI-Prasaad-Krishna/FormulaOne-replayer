@@ -31,6 +31,8 @@ This project provides a comprehensive set of tools for F1 data analysis, accessi
 -   **Driver DNA**: Radar charts comparing drivers on Quali Pace, Race Pace, Consistency, and Tyre Management.
 -   **Track Dominance**: Visual maps of speed and gear shifts around the circuit.
 -   **Position Chart**: Lap-by-lap position changes for the entire grid.
+-   **Track Info**: Detailed 2D track map with sector breakdown and active aero (DRS/MOM) visualization.
+
 
 ## Installation
 
@@ -67,7 +69,7 @@ cd "F1 Visulaizer"
 3.  **In the Apps**:
     -   Enter the **Year** (e.g., `2023`) and **Circuit** (e.g., `Abu Dhabi`).
     -   For comparisons, enter driver abbreviations (e.g., `VER` vs `HAM`).
-    -   **3D Controls**: Drag to rotate (with inertia), Scroll to zoom.
+    -   **3D Controls (Race Replayer)**: Drag to rotate (with inertia), Scroll to zoom.
 
 ## Troubleshooting
 
