@@ -1037,7 +1037,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         ctk.CTkButton(controls, text="Analyze Race Lines", command=self.plot_race_lines, fg_color="#E10600").pack(side="left", padx=20)
         
-        ctk.CTkLabel(self.content_area, text="Click on track to zoom in/out", font=("Roboto", 12), text_color="gray").pack()
+        ctk.CTkLabel(self.content_area, text="Scroll to Zoom | Drag to Pan | Double-Click to Reset", font=("Roboto", 12), text_color="gray").pack()
 
         self.race_lines_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.race_lines_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -1206,25 +1206,117 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.rl_canvas = canvas
         
-        # Click event for zoom
-        def on_click(event):
+        # Store initial limits for reset
+        self.rl_original_xlim = ax.get_xlim()
+        self.rl_original_ylim = ax.get_ylim()
+        
+        # Interaction State
+        self.rl_is_panning = False
+        self.rl_pan_start = None
+
+        # --- Event Handlers ---
+
+        def on_scroll(event):
             if event.inaxes != self.rl_ax: return
-            if event.button != 1: return # Left click only
             
-            if self.rl_is_zoomed:
-                self.rl_ax.autoscale()
-                self.rl_is_zoomed = False
+            # Zoom factors
+            base_scale = 1.2
+            if event.button == 'up':
+                scale_factor = 1 / base_scale
+            elif event.button == 'down':
+                scale_factor = base_scale
             else:
-                x, y = event.xdata, event.ydata
-                # Zoom radius
-                zoom_radius = 600 
-                self.rl_ax.set_xlim(x - zoom_radius, x + zoom_radius)
-                self.rl_ax.set_ylim(y - zoom_radius, y + zoom_radius)
-                self.rl_is_zoomed = True
-                
-            self.rl_canvas.draw()
+                return
+
+            cur_xlim = self.rl_ax.get_xlim()
+            cur_ylim = self.rl_ax.get_ylim()
             
-        fig.canvas.mpl_connect('button_press_event', on_click)
+            xdata = event.xdata
+            ydata = event.ydata
+            
+            cur_width = (cur_xlim[1] - cur_xlim[0])
+            cur_height = (cur_ylim[1] - cur_ylim[0])
+            
+            new_width = cur_width * scale_factor
+            new_height = cur_height * scale_factor
+            
+            relx = (xdata - cur_xlim[0]) / cur_width
+            rely = (ydata - cur_ylim[0]) / cur_height
+            
+            self.rl_ax.set_xlim([xdata - new_width * relx, xdata + new_width * (1 - relx)])
+            self.rl_ax.set_ylim([ydata - new_height * rely, ydata + new_height * (1 - rely)])
+            
+            self.rl_canvas.draw_idle()
+
+        def on_press(event):
+            if event.inaxes != self.rl_ax: return
+            if event.button == 1: # Left Click
+                # Check for Double Click (Matplotlib doesn't have native double click event easily without timer, 
+                # but let's check dblclick property if available or implement simple one)
+                if event.dblclick:
+                    # RESET VIEW
+                    self.rl_ax.set_xlim(self.rl_original_xlim)
+                    self.rl_ax.set_ylim(self.rl_original_ylim)
+                    self.rl_canvas.draw_idle()
+                else:
+                    # START PAN
+                    self.rl_is_panning = True
+                    self.rl_pan_start = (event.x, event.y)
+
+        def on_release(event):
+            if event.button == 1:
+                self.rl_is_panning = False
+                self.rl_pan_start = None
+
+        def on_motion(event):
+            if not self.rl_is_panning or self.rl_pan_start is None or event.inaxes != self.rl_ax:
+                return
+            
+            # Calculate delta in pixels
+            dx_pix = event.x - self.rl_pan_start[0]
+            dy_pix = event.y - self.rl_pan_start[1]
+            
+            # Start and End points in data coordinates
+            # We need to translate pixel delta to data delta. 
+            # Simple way: Get 2 points in display coords, transform back to data.
+            # However, since we are moving the *view*, we shift limits OPPOSITE to mouse movement.
+            # If mouse moves RIGHT (+x), we want the view to move LEFT (so data moves right).
+            
+            # Get data limits width/height
+            xlim = self.rl_ax.get_xlim()
+            ylim = self.rl_ax.get_ylim()
+            
+            # Get display-to-data transform
+            inv = self.rl_ax.transData.inverted()
+            
+            # Point 0: Current center in display
+            # Point 1: Center + delta in display
+            # But simpler: Scale based on axis width/height in pixels
+            
+            bbox = self.rl_ax.bbox
+            width_pix = bbox.width
+            height_pix = bbox.height
+            
+            width_data = xlim[1] - xlim[0]
+            height_data = ylim[1] - ylim[0]
+            
+            dx_data = (dx_pix / width_pix) * width_data
+            dy_data = (dy_pix / height_pix) * height_data
+            
+            # Shift limits
+            self.rl_ax.set_xlim(xlim[0] - dx_data, xlim[1] - dx_data)
+            self.rl_ax.set_ylim(ylim[0] - dy_data, ylim[1] - dy_data)
+            
+            # Update start point for incremental calculation
+            self.rl_pan_start = (event.x, event.y)
+            
+            self.rl_canvas.draw_idle()
+
+        # Connect all events
+        fig.canvas.mpl_connect('scroll_event', on_scroll)
+        fig.canvas.mpl_connect('button_press_event', on_press)
+        fig.canvas.mpl_connect('button_release_event', on_release)
+        fig.canvas.mpl_connect('motion_notify_event', on_motion)
 
     def create_tyre_page(self):
         ctk.CTkLabel(self.content_area, text="Tyre Degradation Analysis", font=("Roboto", 24, "bold")).pack(pady=10)
