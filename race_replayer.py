@@ -66,10 +66,27 @@ def get_driver_color(driver_code, session=None):
 
 def load_race_data(year, circuit, session_type="R"):
     print(f"Loading {year} {circuit} [{session_type}] session data...")
-    try:
+    
+    def internal_load():
         session = fastf1.get_session(year, circuit, session_type)
         session.load(telemetry=True, laps=True, weather=True) # EXTENDED: Load Weather
         return session
+        
+    try:
+        try:
+            return internal_load()
+        except Exception as e1:
+            print(f"Online load failed ({e1}). Retrying with Offline Mode...")
+            
+            try:
+                fastf1.Cache.offline_mode(enabled=True)
+                return internal_load()
+            except Exception as e2:
+                print(f"Offline load also failed: {e2}")
+                raise e2
+            finally:
+                fastf1.Cache.offline_mode(enabled=False)
+                
     except Exception as e:
         print(f"Error loading session: {e}")
         return None

@@ -184,10 +184,31 @@ class AnalyticsDashboardApp(ctk.CTk):
                 if session_type.lower().startswith('q'): identifier = 'Q'
                 elif session_type.lower().startswith('r'): identifier = 'R'
                 else: identifier = session_type 
-                
-                print(f"Loading {year} {circuit} {identifier}...")
-                session = fastf1.get_session(year, circuit, identifier)
-                session.load(telemetry=True, laps=True, weather=False)
+
+                def load_data():
+                    print(f"Loading {year} {circuit} {identifier}...")
+                    session = fastf1.get_session(year, circuit, identifier)
+                    session.load(telemetry=True, laps=True, weather=False)
+                    return session
+
+                try:
+                    # Attempt 1: Normal Load
+                    session = load_data()
+                except Exception as e1:
+                    print(f"Online load failed ({e1}), trying offline mode...")
+                    # Attempt 2: Offline Mode
+                    try:
+                        fastf1.Cache.offline_mode(enabled=True)
+                        session = load_data()
+                    except Exception as e2:
+                        # Re-raise original error or new error? Usually original is more descriptive if it was network
+                        # But if offline also fails, it might be "Data not found"
+                        raise e2
+                    finally:
+                        # Reset offline mode for future attempts? 
+                        # Or keep it if we are offline?
+                        # Safer to reset to allow online checks next time
+                        fastf1.Cache.offline_mode(enabled=False)
                 
                 # Success callback
                 self.after(0, lambda: callback(session))
