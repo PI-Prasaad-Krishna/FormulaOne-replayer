@@ -67,14 +67,17 @@ cd "F1 Visulaizer"
     -   Click **ANALYTICS DASHBOARD** to dive into data.
 
 3.  **In the Apps**:
-    -   Enter the **Year** (e.g., `2023`) and **Circuit** (e.g., `Abu Dhabi`).
-    -   For comparisons, enter driver abbreviations (e.g., `VER` vs `HAM`).
+    -   Select the **Year** from the dropdown menu (e.g., `2024`).
+    -   The **Circuit** dropdown will automatically fetch and populate with valid race weekends for that year (Testing sessions are filtered out!).
+    -   For comparisons in the Analytics Dashboard, enter driver abbreviations (e.g., `VER` vs `HAM`).
+    -   **Loading**: All data fetching happens in the background, so the UI will never freeze!
     -   **3D Controls (Race Replayer)**: Drag to rotate (with inertia), Scroll to zoom.
 
 ## Troubleshooting
 
 -   **High DPI Displays**: If the window looks too small or text is blurry, check your OS display scaling settings. CustomTkinter generally handles scaling well.
--   **Slow Loading**: First-time data loading for a race can take a minute as `fastf1` downloads and caches large telemetry files. Subsequent loads will be much faster.
+-   **Slow Loading**: First-time data loading for a race can take a minute as `fastf1` downloads and caches large telemetry files. Subsequent loads will be instantaneous using the local cache.
+-   **No Internet? No Problem**: The app features an automatic Offline Fallback Mode. If a network request fails but you have cached the race previously, it will automatically load from the `f1_cache` folder!
 -   **Missing Data**: Some older races or practice sessions might have incomplete telemetry.
 
 ## Acknowledgments

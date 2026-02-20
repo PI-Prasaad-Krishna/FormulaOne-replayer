@@ -59,12 +59,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         # Session Selection
         ctk.CTkLabel(self.sidebar, text="Year:").pack(padx=20, anchor="w")
+        self.years_list = [str(y) for y in range(2025, 2017, -1)]
         self.year_var = ctk.StringVar(value="2023")
-        ctk.CTkEntry(self.sidebar, textvariable=self.year_var).pack(padx=20, pady=(0, 10), fill="x")
+        self.year_combo = ctk.CTkComboBox(self.sidebar, values=self.years_list, variable=self.year_var, command=self.on_year_changed)
+        self.year_combo.pack(padx=20, pady=(0, 10), fill="x")
         
         ctk.CTkLabel(self.sidebar, text="Circuit:").pack(padx=20, anchor="w")
-        self.event_var = ctk.StringVar(value="Abu Dhabi")
-        ctk.CTkEntry(self.sidebar, textvariable=self.event_var).pack(padx=20, pady=(0, 20), fill="x")
+        self.event_var = ctk.StringVar(value="Loading...")
+        self.circuit_combo = ctk.CTkComboBox(self.sidebar, values=["Loading..."], variable=self.event_var)
+        self.circuit_combo.pack(padx=20, pady=(0, 20), fill="x")
         
         ctk.CTkLabel(self.sidebar, text="PAGES", font=("Roboto", 12, "bold"), text_color="gray").pack(padx=20, anchor="w", pady=(10, 5))
         
@@ -110,6 +113,36 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         # Default Page
         self.show_page("telemetry")
+        
+        # Initial Circuit Load
+        self.on_year_changed(self.year_var.get())
+
+    def on_year_changed(self, new_year):
+        """Triggered when user selects a new year from the dropdown."""
+        self.circuit_combo.configure(state="disabled", values=["Loading circuits..."])
+        self.event_var.set("Loading circuits...")
+        
+        # Launch background thread
+        threading.Thread(target=self.fetch_circuits, args=(int(new_year),), daemon=True).start()
+
+    def fetch_circuits(self, year):
+        """Runs in background thread to avoid freezing UI."""
+        try:
+            schedule = fastf1.get_event_schedule(year)
+            valid_events = schedule[schedule['EventFormat'] != 'testing']
+            circuits = valid_events['EventName'].tolist()
+            self.after(0, self._update_circuit_dropdown, circuits)
+        except Exception as e:
+            print(f"Error fetching schedule for {year}: {e}")
+            self.after(0, self._update_circuit_dropdown, ["Error loading"])
+
+    def _update_circuit_dropdown(self, circuits):
+        """Runs on main thread to update Tkinter widgets safely."""
+        self.circuit_combo.configure(state="normal", values=circuits)
+        if circuits and circuits[0] != "Error loading":
+            self.event_var.set(circuits[-1])
+        else:
+            self.event_var.set("Not Available")
 
     def show_page(self, page_name):
         # Update styling for sidebar buttons

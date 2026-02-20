@@ -546,14 +546,18 @@ class RaceReplayerApp(ctk.CTk):
         self.control_frame.grid(row=0, column=0, columnspan=3, sticky="ew", padx=0, pady=0)
         
         ctk.CTkLabel(self.control_frame, text="Year:", font=("Roboto", 14)).pack(side="left", padx=(20, 5))
-        self.year_entry = ctk.CTkEntry(self.control_frame, width=60, placeholder_text="2023")
-        self.year_entry.insert(0, "2023")
-        self.year_entry.pack(side="left", padx=5)
+        # Dynamic Year Selection
+        self.years_list = [str(y) for y in range(2025, 2017, -1)]
+        self.year_var = ctk.StringVar(value="2023")
+        self.year_combo = ctk.CTkComboBox(self.control_frame, values=self.years_list, variable=self.year_var, width=80, command=self.on_year_changed)
+        self.year_combo.pack(side="left", padx=5)
         
         ctk.CTkLabel(self.control_frame, text="Circuit:", font=("Roboto", 14)).pack(side="left", padx=(20, 5))
-        self.circuit_entry = ctk.CTkEntry(self.control_frame, width=150, placeholder_text="Abu Dhabi")
-        self.circuit_entry.insert(0, "Abu Dhabi")
-        self.circuit_entry.pack(side="left", padx=5)
+        
+        # Dynamic Circuit Selection
+        self.circuit_var = ctk.StringVar(value="Loading...")
+        self.circuit_combo = ctk.CTkComboBox(self.control_frame, values=["Loading..."], variable=self.circuit_var, width=180)
+        self.circuit_combo.pack(side="left", padx=5)
         
         self.load_btn = ctk.CTkButton(self.control_frame, text="LOAD RACE", command=self.start_replay, fg_color="#E10600", font=("Roboto", 12, "bold"))
         self.load_btn.pack(side="left", padx=20)
@@ -688,6 +692,40 @@ class RaceReplayerApp(ctk.CTk):
         
         # Start Physics Loop
         self.update_camera_physics()
+
+        # Initial Circuit Load
+        self.on_year_changed(self.year_var.get())
+
+    def on_year_changed(self, new_year):
+        """Triggered when user selects a new year from the dropdown."""
+        self.circuit_combo.configure(state="disabled", values=["Loading circuits..."])
+        self.circuit_var.set("Loading circuits...")
+        
+        # Launch background thread to fetch circuits
+        threading.Thread(target=self.fetch_circuits, args=(int(new_year),), daemon=True).start()
+
+    def fetch_circuits(self, year):
+        """Runs in background thread to avoid freezing UI."""
+        try:
+            # Quick check if cache needs to be explicitly enabled here though it's global
+            schedule = fastf1.get_event_schedule(year)
+            # Filter out testing sessions robustly using EventFormat
+            valid_events = schedule[schedule['EventFormat'] != 'testing']
+            circuits = valid_events['EventName'].tolist()
+            
+            # Update UI on main thread
+            self.after(0, self._update_circuit_dropdown, circuits)
+        except Exception as e:
+            print(f"Error fetching schedule for {year}: {e}")
+            self.after(0, self._update_circuit_dropdown, ["Error loading"])
+
+    def _update_circuit_dropdown(self, circuits):
+        """Runs on main thread to update Tkinter widgets safely."""
+        self.circuit_combo.configure(state="normal", values=circuits)
+        if circuits and circuits[0] != "Error loading":
+            self.circuit_var.set(circuits[-1]) # Default to last race of the year (usually most interesting)
+        else:
+            self.circuit_var.set("Not Available")
 
     def on_cam_press(self, event):
         if not self.is_3d_mode.get(): return
@@ -830,8 +868,8 @@ class RaceReplayerApp(ctk.CTk):
 
     def start_replay(self):
         try:
-            year = int(self.year_entry.get())
-            circuit = self.circuit_entry.get()
+            year = int(self.year_var.get())
+            circuit = self.circuit_var.get()
         except ValueError:
             messagebox.showerror("Input Error", "Year must be a number.")
             return
