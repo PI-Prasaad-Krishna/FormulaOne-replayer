@@ -13,10 +13,10 @@ This project provides a comprehensive set of tools for F1 data analysis, accessi
 
 ### 🏁 Race Replayer (Modern Edition)
 -   **Full Race Animation**: Smooth 20-driver playback with interpolated positions.
--   **3D View**:
+-   **3D View (Powered by VisPy)**:
     -   **Soft Camera**: Physics-based navigation with inertia and smooth damping.
     -   **Ghost Curtain**: Subtle elevation visualization for track depth without visual clutter.
-    -   **Optimized Rendering**: Smart blitting logic ensures silky smooth rotation even at 60FPS.
+    -   **Optimized Rendering**: Dedicated sidecar rendering engine ensures silky smooth rotation even at 60FPS.
 -   **Zero-Flicker Leaderboard**: High-performance UI with state caching for instant, jitter-free updates.
 -   **Playback Control**: Pause, Resume, and adjustable speeds (1x–50x).
 -   **Tyre Strategy**: Visual indicator of current tyre compounds for each driver.
@@ -43,7 +43,7 @@ Ensure you have Python 3.8+ installed.
 Install the required Python packages using pip:
 
 ```bash
-pip install fastf1 customtkinter matplotlib pandas scipy numpy
+pip install fastf1 customtkinter matplotlib pandas scipy numpy vispy
 ```
 
 ### 3. Setup

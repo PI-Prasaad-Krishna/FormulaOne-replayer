@@ -25,6 +25,8 @@ import customtkinter as ctk # PIP INSTALL CUSTOMTKINTER
 import tkinter as tk
 from tkinter import messagebox
 import threading
+import subprocess # Added for Sidecar
+import json # Added for Sidecar
 
 # Configure output for standard text
 if sys.platform.startswith("win"):
@@ -661,6 +663,11 @@ class RaceReplayerApp(ctk.CTk):
         self.hud_elements = {} # Store HUD artists
         self.current_frame = 0
         
+        # Sidecar State
+        self.sidecar_process = None
+        self.using_sidecar = False
+        self.sidecar_listener_thread = None
+        
         # UI State Cache (Prevent Redundant Updates)
         self.row_states = {} 
 
@@ -862,9 +869,29 @@ class RaceReplayerApp(ctk.CTk):
         if getattr(self, 'anim', None):
             try: self.anim.event_source.stop()
             except: pass
+        self.stop_sidecar()
         self.quit()
         self.destroy()
         sys.exit()
+
+    def stop_sidecar(self):
+        if self.sidecar_process:
+            try:
+                # Send gentle exit command
+                cmd = json.dumps({"cmd": "exit"}) + "\n"
+                self.sidecar_process.stdin.write(cmd)
+                self.sidecar_process.stdin.flush()
+            except: pass
+            
+            try:
+                self.sidecar_process.terminate()
+                self.sidecar_process.wait(timeout=1)
+            except: 
+                try: self.sidecar_process.kill()
+                except: pass
+        self.sidecar_process = None
+        self.using_sidecar = False
+        self.sidecar_listener_thread = None
 
     def start_replay(self):
         try:
@@ -932,20 +959,169 @@ class RaceReplayerApp(ctk.CTk):
         self.is_paused = False
         self.is_finished = False
         
-        year = self.year_entry.get()
-        circuit = self.circuit_entry.get()
+        year = self.year_var.get()
+        circuit = self.circuit_var.get()
         self.status_lbl.configure(text=f"Replaying: {year} {circuit}", text_color="#2CC985")
 
                                     
     def toggle_3d_mode(self):
+        use_3d = self.is_3d_mode.get()
+        if use_3d:
+            # Try launching Sidecar
+            success = self.start_sidecar()
+            if not success:
+                 print("Sidecar failed. Falling back to internal Matplotlib 3D.")
+                 self.using_sidecar = False
+                 # We stay in "3D Mode" but use matplotlib fallback
+            else:
+                 print("Sidecar launched successfully.")
+        else:
+            # Stop Sidecar
+            self.stop_sidecar()
+            
         # Restart plot with new mode if data exists
         if self.telemetry_data:
             self.setup_plot()
-            if not self.is_paused and not self.is_finished:
+            if not self.is_paused and self.anim and self.current_frame < len(self.common_time):
                  self.start_animation(start_frame=self.current_frame)
             else:
                  # Just redraw current frame static
                  pass
+
+    def start_sidecar(self):
+        """ Attempts to launch the VisPy Viewer. Returns True if successful. """
+        if self.sidecar_process is not None:
+             return True # Already running
+             
+        try:
+             # Look for the script in the same directory
+             viewer_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "f1_3d_viewer.py")
+             if not os.path.exists(viewer_script):
+                 print(f"Error: Could not find {viewer_script}")
+                 return False
+                 
+             # Launch Subprocess
+             # Use the same python executable running this script
+             python_exe = sys.executable
+             
+             # CREATE_NO_WINDOW hides the console black box on windows
+             creationflags = 0
+             if sys.platform == "win32":
+                  creationflags = subprocess.CREATE_NO_WINDOW
+             
+             self.sidecar_process = subprocess.Popen(
+                 [python_exe, viewer_script],
+                 stdin=subprocess.PIPE,
+                 stdout=subprocess.PIPE,
+                 stderr=subprocess.PIPE,
+                 text=True,
+                 creationflags=creationflags
+             )
+             
+             # Wait for READY signal or Error
+             # Read a few lines to check
+             ready = False
+             for _ in range(10): 
+                 line = self.sidecar_process.stdout.readline()
+                 if "CRITICAL" in line or "Error" in line:
+                     print(f"Sidecar Init Error: {line}")
+                     return False
+                 if "VISPY_READY" in line:
+                     ready = True
+                     break
+                     
+             if not ready:
+                 print("Sidecar did not signal readiness.")
+                 self.sidecar_process.terminate()
+                 self.sidecar_process = None
+                 return False
+                 
+             self.using_sidecar = True
+             
+             # --- Send Initial Track Data ---
+             if self.telemetry_data:
+                 ref_driver = list(self.telemetry_data.keys())[0]
+                 ref_x = self.telemetry_data[ref_driver]["X"]
+                 ref_y = self.telemetry_data[ref_driver]["Y"]
+                 ref_z = self.telemetry_data[ref_driver]["Z"]
+                 mask = ~np.isnan(ref_x)
+                 valid_x = ref_x[mask]
+                 valid_y = ref_y[mask]
+                 valid_z = ref_z[mask]
+                 
+                 step_mesh = 1 # Send FULL resolution track data to VisPy for perfectly smooth lines
+                 track_data = {
+                     "cmd": "init_track",
+                     "x": valid_x[::step_mesh].tolist(),
+                     "y": valid_y[::step_mesh].tolist(),
+                     "z": valid_z[::step_mesh].tolist()
+                 }
+                 
+                 # Bounds
+                 min_x, max_x = np.min(valid_x) - 100, np.max(valid_x) + 100
+                 min_y, max_y = np.min(valid_y) - 100, np.max(valid_y) + 100
+                 min_z, max_z = np.min(valid_z) - 20, np.max(valid_z) + 20
+                 track_data["bounds"] = (min_x, max_x, min_y, max_y, min_z, max_z)
+                 
+                 try:
+                     cmd_str = json.dumps(track_data) + "\n"
+                     self.sidecar_process.stdin.write(cmd_str)
+                     self.sidecar_process.stdin.flush()
+                 except Exception as e:
+                     print(f"Failed to send init track: {e}")
+                     self.using_sidecar = False
+                     return False
+             
+             # --- Start IPC Listener Thread ---
+             self.sidecar_listener_thread = threading.Thread(target=self.listen_to_sidecar, daemon=True)
+             self.sidecar_listener_thread.start()
+             
+             return True
+             
+        except Exception as e:
+             print(f"Exception launching Sidecar: {e}")
+             self.sidecar_process = None
+             return False
+
+    def listen_to_sidecar(self):
+        """ Runs in background thread to catch commands (Pause, Speed) from VisPy """
+        if not self.sidecar_process or not self.sidecar_process.stdout: return
+        
+        try:
+            for line in iter(self.sidecar_process.stdout.readline, ''):
+                if not line or not self.using_sidecar: break
+                line = line.strip()
+                if not line: continue
+                
+                try:
+                    data = json.loads(line)
+                    cmd = data.get("cmd")
+                    
+                    if cmd == "input":
+                        action = data.get("action")
+                        if action == "toggle_pause":
+                            self.after(0, self.toggle_pause)
+                        elif action == "speed_up":
+                            self.after(0, lambda: self.adjust_speed(1))
+                        elif action == "speed_down":
+                            self.after(0, lambda: self.adjust_speed(-1))
+                except json.JSONDecodeError:
+                    pass # Ignore non-json print statements from vispy
+        except Exception as e:
+            print(f"Sidecar Listener Error: {e}")
+
+
+    def adjust_speed(self, direction):
+        """ Helper to cycle speed up or down """
+        speeds = ["1x", "5x", "10x", "20x", "50x"]
+        current = self.speed_var.get()
+        try:
+             idx = speeds.index(current)
+             new_idx = max(0, min(len(speeds) - 1, idx + direction))
+             self.speed_combo.set(speeds[new_idx])
+             self.change_speed(speeds[new_idx])
+        except ValueError:
+             pass
 
     def setup_plot(self):
         # safely clear
@@ -958,7 +1134,8 @@ class RaceReplayerApp(ctk.CTk):
         # Map: Left 75%
         # HUD: Right 25%
         
-        if use_3d:
+        if use_3d and not self.using_sidecar:
+            # FALLBACK to internal Matplotlib 3D
             self.ax = self.fig.add_axes([0.0, 0.0, 0.75, 1.0], projection='3d')
             self.ax.set_facecolor('#121212')
             # Pane colors
@@ -986,8 +1163,8 @@ class RaceReplayerApp(ctk.CTk):
         
         mask = ~np.isnan(ref_x)
         
-        if use_3d:
-             # --- 3D CURTAIN EFFECT ---
+        if use_3d and not self.using_sidecar:
+             # --- INTERNAL 3D CURTAIN EFFECT (Fallback Only) ---
              try:
                  # 1. Prepare Data & Downsample for Performance
                  # Take every 5th point for the main line, every 10th for the mesh
@@ -1029,10 +1206,7 @@ class RaceReplayerApp(ctk.CTk):
                  zn = np.full_like(zt, np.nan)
                  
                  # Stack and Flatten: (3, N) -> (3N,)
-                 # We want column-wise stacking: [x1, x1, nan], [x2, x2, nan]...
-                 # So we rely on 'F' (Fortran) order flattening or specific reshape
-                 
-                 # Stack: [[x1, x2...], [x1, x2...], [nan, nan...]]
+                 # We want column-wise stacking: [x1, x2...], [x1, x2...], [nan, nan...]
                  # Flatten 'F' gives: x1, x1, nan, x2, x2, nan...
                  
                  X_lines = np.vstack([xt, xb, xn]).flatten(order='F')
@@ -1053,10 +1227,11 @@ class RaceReplayerApp(ctk.CTk):
                  # Fallback
                  self.ax.plot(ref_x[mask], ref_y[mask], ref_z[mask], color='#333333', linewidth=4, alpha=0.5)
         else:
+             # 2D Mode OR Sidecar Mode (Draw 2D track on main window)
              self.ax.plot(ref_x[mask], ref_y[mask], color='#333333', linewidth=6, alpha=0.5)
         
         # Lap Counter (Top Left of Map)
-        if use_3d:
+        if use_3d and not self.using_sidecar:
             self.lap_counter_text = self.ax.text2D(0.02, 0.95, "00:00.000", transform=self.ax.transAxes, 
                                                 color='white', fontsize=18, fontweight='bold')
         else:
@@ -1069,17 +1244,17 @@ class RaceReplayerApp(ctk.CTk):
         
         for driver, data in self.telemetry_data.items():
             color = data["Color"]
-            if use_3d:
-                 # 3D Plot
+            if use_3d and not self.using_sidecar:
+                 # Internal 3D Plot
                  dot, = self.ax.plot([], [], [], marker='o', color=color, markersize=6, markeredgecolor='black', markeredgewidth=1)
             else:
+                 # 2D Plot
                  dot, = self.ax.plot([], [], marker='o', color=color, markersize=8, markeredgecolor='black', markeredgewidth=1)
             
             self.driver_dots[driver] = dot
             
-            # Text in 3D
-            if use_3d:
-                 # FIX: Enable clipping to prevent text from bleeding into HUD during zoom
+            # Text Setup
+            if use_3d and not self.using_sidecar:
                  text = self.ax.text(0, 0, 0, driver, color=color, fontsize=8, fontweight='bold', clip_on=True)
             else:
                  text = self.ax.text(0, 0, driver, color=color, fontsize=9, fontweight='bold', clip_on=True, 
@@ -1140,7 +1315,10 @@ class RaceReplayerApp(ctk.CTk):
         self.plot_bounds = (min_x, max_x, min_y, max_y, min_z, max_z)
         self.zoom_level = 1.0
         
-        if use_3d:
+        self.plot_bounds = (min_x, max_x, min_y, max_y, min_z, max_z)
+        self.zoom_level = 1.0
+        
+        if use_3d and not self.using_sidecar:
              self.ax.set_zlim(min_z, max_z)
              # Set view
              self.ax.view_init(elev=self.cam_elev, azim=self.cam_azim) # Use stored camera pos
@@ -1257,8 +1435,9 @@ class RaceReplayerApp(ctk.CTk):
                 self.is_finished = True
                 return []
 
-            leaderboard_data = []
+            leaderboard_data = [] # moved further up, need to fix
             current_race_time = self.common_time[idx]
+            sidecar_frame_data = {}
 
             for driver, dot in self.driver_dots.items():
                 d_data = self.telemetry_data[driver]
@@ -1281,11 +1460,13 @@ class RaceReplayerApp(ctk.CTk):
                 if np.isnan(x) or np.isnan(y):
                     dot.set_visible(False)
                     self.driver_labels[driver].set_visible(False)
+                    sidecar_frame_data[driver] = {"visible": False, "x": 0, "y": 0, "z": 0, "color": d_data["Color"]}
                 else:
                     dot.set_visible(True)
                     self.driver_labels[driver].set_visible(True)
+                    sidecar_frame_data[driver] = {"visible": True, "x": float(x), "y": float(y), "z": float(z), "color": d_data["Color"]}
                     
-                    if self.is_3d_mode.get():
+                    if self.is_3d_mode.get() and not self.using_sidecar:
                         dot.set_data([x], [y])
                         dot.set_3d_properties([z])
                         self.driver_labels[driver].set_position((x, y))
@@ -1304,14 +1485,6 @@ class RaceReplayerApp(ctk.CTk):
                                 is_pitting = True
                                 break
                     
-                    # B. Proximity Fallback Check (if not already detected)
-                    # B. Proximity Fallback Check REMOVED
-                    # We rely solely on official start/end timing intervals to avoid false positives on track corners.
-                    pass
-
-                    dot.set_data([x], [y])
-                    self.driver_labels[driver].set_position((x + 200, y + 200))
-                    
                     if is_dnf:
                          label_text = f"{driver} (DNF)"
                     else:
@@ -1328,6 +1501,49 @@ class RaceReplayerApp(ctk.CTk):
                         self.driver_labels[driver].set_text(label_text)
                     
                     leaderboard_data.append((driver, dist, is_dnf))
+                    
+                    # Update Sidecar Data (Cast is_dnf to pure bool for JSON)
+                    if self.using_sidecar:
+                         sidecar_frame_data[driver]["is_dnf"] = bool(is_dnf)
+
+            # --- STREAM TO SIDECAR ---
+            if self.using_sidecar and self.sidecar_process:
+                 # Check if the process is still alive. If user clicked the 'X' on sidecar window,
+                 # poll() will return the exit code (not None).
+                 if self.sidecar_process.poll() is not None:
+                      print("Sidecar window closed by user. Toggling 3D mode OFF.")
+                      # Stop sending data
+                      self.using_sidecar = False
+                      self.sidecar_process = None
+                      # We must schedule the UI update back on the main thread
+                      self.after(0, lambda: self.switch_3d.deselect()) # Visual update
+                      self.after(0, self.toggle_3d_mode) # Internal logic update
+                 else:
+                      try:
+                          # Create UI State Payload
+                          minutes = int(current_race_time // 60)
+                          seconds = int(current_race_time % 60)
+                          ms = int((current_race_time % 1) * 1000)
+                          lap_str = f"{minutes:02d}:{seconds:02d}.{ms:03d}"
+                          
+                          finish_text = ""
+                          if self.is_finished: finish_text = "RACE FINISHED"
+                          
+                          ui_payload = {
+                              "speed": self.speed_var.get(),
+                              "lap_time": lap_str,
+                              "is_paused": self.is_paused,
+                              "finish_status": finish_text
+                          }
+                          
+                          msg = json.dumps({"cmd": "update_frame", "drivers": sidecar_frame_data, "ui": ui_payload}) + "\n"
+                          self.sidecar_process.stdin.write(msg)
+                          self.sidecar_process.stdin.flush()
+                      except Exception as e:
+                          print(f"Failed to stream frame to sidecar: {e}")
+                          # Disable sidecar if pipe breaks
+                          self.using_sidecar = False
+
 
             # Update Lap Counter - Dynamic FastF1 Logic
             try:
