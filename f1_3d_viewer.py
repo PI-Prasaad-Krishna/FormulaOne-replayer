@@ -140,8 +140,14 @@ class InertiaTurntableCamera(TurntableCamera):
         # We must intercept mouse_move events that happen while dragging
         
         if event.type == 'mouse_wheel':
-            # Let the default handle zoom
-            super().viewbox_mouse_event(event)
+            # Implement zoom manually since interactive=False breaks default zoom
+            zoom_factor = 1.1 ** -event.delta[1]
+            if hasattr(self, 'distance') and self.distance is not None:
+                self.distance *= zoom_factor
+            else:
+                self.scale_factor *= zoom_factor
+            self.view_changed()
+            event.handled = True
             return
 
         if event.button == 1:
@@ -304,6 +310,9 @@ def on_timer(event):
                     # Create new marker and text
                     dot = scene.visuals.Markers(parent=state.view.scene)
                     text = scene.visuals.Text(text=driver, color=color, bold=True, font_size=10, parent=state.view.scene)
+                    # Disable depth testing so dots/names NEVER clip into the track mesh
+                    dot.set_gl_state('translucent', depth_test=False)
+                    text.set_gl_state('translucent', depth_test=False)
                     state.driver_dots[driver] = dot
                     state.driver_labels[driver] = text
                 
@@ -312,14 +321,16 @@ def on_timer(event):
                 
                 if visible and not np.isnan(cx) and not np.isnan(cy):
                      # Elevate Z slightly so it doesn't clip into the track line
-                     dot.set_data(pos=np.array([[cx, cy, cz + 1.5]]), face_color=hex_to_rgba(color), edge_color=(0,0,0,1), size=8)
-                     # Position text slightly above
-                     text.pos = [cx, cy, cz + 6.5]
+                     z_offset = 2.0
+                     dot_size = 8
+                     dot.set_data(pos=np.array([[cx, cy, cz + z_offset]]), face_color=hex_to_rgba(color), edge_color=(0,0,0,1), size=dot_size)
+                     # Position text clearly next to the dot (matching Matplotlib style)
+                     text.pos = [cx + 100.0, cy + 100.0, cz + z_offset + 10.0]
                      
                      # Simple logic for DNF
                      if info.get('is_dnf', False):
-                          dot.set_data(pos=np.array([[cx, cy, cz]]), face_color=hex_to_rgba("#666666"), edge_color=(0,0,0,1), size=8)
-                          text.color = "#666666"
+                          dot.set_data(pos=np.array([[cx, cy, cz + z_offset]]), face_color=hex_to_rgba("#666666"), edge_color=(0,0,0,1), size=dot_size)
+                          text.color = "#888888"
                           text.text = f"{driver} (DNF)"
                      else:
                           text.color = color

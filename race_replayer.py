@@ -581,7 +581,7 @@ class RaceReplayerApp(ctk.CTk):
         # 3D Toggle Switch
         self.is_3d_mode = ctk.BooleanVar(value=False)
         self.switch_3d = ctk.CTkSwitch(self.control_frame, text="3D MAP", variable=self.is_3d_mode, command=self.toggle_3d_mode, progress_color="#E10600")
-        self.switch_3d.pack(side="left", padx=20)
+        self.switch_3d.pack(side="right", padx=20)
 
         # -- 1.1 Session Info Panel (Weather & Status) --
         self.session_info_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
