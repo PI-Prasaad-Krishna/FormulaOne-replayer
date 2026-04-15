@@ -1,12 +1,12 @@
 # F1 Visualizer Hub 🏎️
 
-![Version](https://img.shields.io/github/v/release/PI-Prasaad-Krishna/FormulaOne-replayer?color=E10600&label=version)
+![Version](https://img.shields.io/github/v/tag/PI-Prasaad-Krishna/FormulaOne-replayer?color=E10600&label=version&sort=semver)
 
 An interactive Python tool suite for analyzing and visualizing Formula 1 races using telemetry from the FastF1 library.
 
 ## Current Version
 
-- The badge above always shows the latest GitHub Release version.
+- The badge above always shows the latest tagged version.
 - See `CHANGELOG.md` for release notes.
 
 ## Overview
