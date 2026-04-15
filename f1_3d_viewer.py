@@ -30,6 +30,7 @@ class AppState:
     def __init__(self):
         self.driver_dots = {}
         self.driver_labels = {}
+        self.driver_label_shadows = {}
         self.lock = threading.Lock()
         self.canvas = None
         self.view = None
@@ -275,6 +276,11 @@ def on_timer(event):
             # LERP Factor (Higher = faster snap. 0.2 at 60fps is smooth but responsive)
             # We bypass LERP if paused so dots don't drift after hitting pause
             lerp_t = 1.0 if state.is_paused else 0.2 
+            # Keep both transform directions and choose a valid on-screen projection.
+            # Different backends/camera pipelines can expose slightly different map behavior.
+            world_to_canvas_a = state.canvas.scene.node_transform(state.view.scene)
+            world_to_canvas_b = state.view.scene.node_transform(state.canvas.scene)
+            canvas_w, canvas_h = float(state.canvas.size[0]), float(state.canvas.size[1])
             
             for driver, info in target_data.items():
                 tx, ty, tz = info['x'], info['y'], info['z']
@@ -309,14 +315,18 @@ def on_timer(event):
                 if driver not in state.driver_dots:
                     # Create new marker and text
                     dot = scene.visuals.Markers(parent=state.view.scene)
-                    text = scene.visuals.Text(text=driver, color=color, bold=True, font_size=10, parent=state.view.scene)
+                    shadow = scene.visuals.Text(text=driver, color=(0, 0, 0, 0.85), bold=False, font_size=8, parent=state.canvas.scene)
+                    text = scene.visuals.Text(text=driver, color=color, bold=False, font_size=7, parent=state.canvas.scene)
                     # Disable depth testing so dots/names NEVER clip into the track mesh
                     dot.set_gl_state('translucent', depth_test=False)
+                    shadow.set_gl_state('translucent', depth_test=False)
                     text.set_gl_state('translucent', depth_test=False)
                     state.driver_dots[driver] = dot
+                    state.driver_label_shadows[driver] = shadow
                     state.driver_labels[driver] = text
                 
                 dot = state.driver_dots[driver]
+                shadow = state.driver_label_shadows[driver]
                 text = state.driver_labels[driver]
                 
                 if visible and not np.isnan(cx) and not np.isnan(cy):
@@ -324,20 +334,58 @@ def on_timer(event):
                      z_offset = 2.0
                      dot_size = 8
                      dot.set_data(pos=np.array([[cx, cy, cz + z_offset]]), face_color=hex_to_rgba(color), edge_color=(0,0,0,1), size=dot_size)
-                     # Position text clearly next to the dot (matching Matplotlib style)
-                     text.pos = [cx + 100.0, cy + 100.0, cz + z_offset + 10.0]
+                     # Project 3D world coordinates to 2D canvas space for stable, readable labels.
+                     label_world = np.array([cx, cy, cz + z_offset + 10.0, 1.0], dtype=np.float32)
+                     projected = None
+                     for tf in (world_to_canvas_a, world_to_canvas_b):
+                         try:
+                             mapped = np.asarray(tf.map(label_world), dtype=np.float64).ravel()
+                             if mapped.size < 2:
+                                 continue
+                             sx = float(mapped[0])
+                             sy = float(mapped[1])
+                             if mapped.size >= 4 and abs(float(mapped[3])) > 1e-6:
+                                 w = float(mapped[3])
+                                 sx /= w
+                                 sy /= w
+
+                             # Some transform chains are y-up; others are y-down in canvas space.
+                             for cand_y in (sy, canvas_h - sy):
+                                 if np.isfinite(sx) and np.isfinite(cand_y):
+                                     if -80.0 <= sx <= canvas_w + 80.0 and -80.0 <= cand_y <= canvas_h + 80.0:
+                                         projected = (sx, cand_y)
+                                         break
+                             if projected is not None:
+                                 break
+                         except Exception:
+                             continue
+
+                     if projected is not None:
+                         sx, sy = projected
+                         sx = float(round(sx + 6.0))
+                         sy = float(round(sy - 6.0))
+                         shadow.pos = [sx + 1.0, sy - 1.0]
+                         text.pos = [sx, sy]
+                         shadow.visible = True
+                         text.visible = True
+                     else:
+                         shadow.visible = False
+                         text.visible = False
                      
                      # Simple logic for DNF
                      if info.get('is_dnf', False):
                           dot.set_data(pos=np.array([[cx, cy, cz + z_offset]]), face_color=hex_to_rgba("#666666"), edge_color=(0,0,0,1), size=dot_size)
+                          shadow.text = f"{driver} (DNF)"
                           text.color = "#888888"
                           text.text = f"{driver} (DNF)"
                      else:
-                          text.color = color
-                          text.text = driver 
+                         shadow.text = driver
+                         text.color = color
+                         text.text = driver
                 else:
                      dot.set_data(pos=np.empty((0,3)))
-                     text.text = ""
+                     shadow.visible = False
+                     text.visible = False
 
     state.canvas.update()
 
