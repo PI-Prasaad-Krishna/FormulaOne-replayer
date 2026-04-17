@@ -57,7 +57,7 @@ pip install fastf1 customtkinter matplotlib pandas scipy numpy vispy
 Clone the repository or download the source code:
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/PI-Prasaad-Krishna/FormulaOne-replayer.git
 cd "F1 Visulaizer"
 ```
 

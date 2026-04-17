@@ -1,0 +1,2 @@
+# Exclude the website project from generated source archives (GitHub Release zip/tar)
+website export-ignore
