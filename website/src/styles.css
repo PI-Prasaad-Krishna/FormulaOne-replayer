@@ -4,22 +4,22 @@
   background:
     radial-gradient(circle at top left, rgba(255, 60, 48, 0.16), transparent 30%),
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 24%),
-    linear-gradient(180deg, #060709 0%, #0a0c11 42%, #050608 100%);
+    linear-gradient(180deg, #050608 0%, #0a0c11 42%, #030406 100%);
   color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --bg: #060709;
-  --surface: rgba(12, 14, 20, 0.72);
-  --surface-strong: rgba(18, 20, 28, 0.92);
+  --bg: #050608;
+  --surface: rgba(14, 16, 24, 0.75);
+  --surface-strong: rgba(20, 22, 32, 0.95);
   --line: rgba(255, 255, 255, 0.12);
   --text: rgba(255, 255, 255, 0.96);
   --muted: rgba(255, 255, 255, 0.7);
   --muted-soft: rgba(255, 255, 255, 0.5);
   --accent: #ff3b30;
-  --accent-soft: rgba(255, 59, 48, 0.18);
-  --glow: rgba(255, 59, 48, 0.28);
+  --accent-soft: rgba(255, 59, 48, 0.22);
+  --glow: rgba(255, 59, 48, 0.35);
 }
 
 html {
@@ -214,23 +214,17 @@ main {
 .release-panel h2 {
   margin: 0;
   line-height: 0.95;
-  letter-spacing: -0.05em;
+  letter-spacing: -0.04em;
 }
 
 .hero-copy h1 {
   max-width: 12ch;
   font-size: clamp(3.2rem, 7vw, 6.8rem);
-}
-
-.hero-copy h1::after {
-  content: '';
-  display: block;
-  width: 5.5rem;
-  height: 0.25rem;
-  margin-top: 1rem;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--accent), transparent);
-  opacity: 0.75;
+  background: linear-gradient(135deg, #ffffff 40%, rgba(255, 255, 255, 0.4) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  padding-bottom: 0.2rem;
 }
 
 .hero-copy p,
@@ -248,7 +242,6 @@ main {
   font-size: 1.04rem;
 }
 
-.eyebrow,
 .section-heading span,
 .track-label,
 .muted,
@@ -261,7 +254,21 @@ main {
   font-size: 0.72rem;
 }
 
-.eyebrow,
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 1.25rem;
+}
+
 .section-heading span,
 .track-label {
   color: rgba(255, 255, 255, 0.56);
@@ -347,6 +354,7 @@ main {
   content: '';
   position: absolute;
   inset: 0;
+  border-radius: inherit;
   background: linear-gradient(150deg, rgba(255, 255, 255, 0.12), transparent 40%);
   opacity: 0;
   transition: opacity 220ms ease;
@@ -354,7 +362,7 @@ main {
   isolation: isolate;
 }
 
-.stat-card:hover,
+.stat-card::before,
 .step-card::before {
   content: '';
   position: absolute;
@@ -365,6 +373,8 @@ main {
   transition: opacity 220ms ease;
   pointer-events: none;
 }
+
+.stat-card:hover,
 .download-card:hover,
 .step-card:hover {
   transform: translateY(-4px);
@@ -387,20 +397,31 @@ main {
 .track-panel {
   position: relative;
   width: min(100%, 520px);
-  min-height: 36rem;
-  padding: 1.25rem;
-  border-radius: 2rem;
+  min-height: 38rem;
+  padding: 2rem;
+  border-radius: 2.5rem;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-.vehicle-panel::before {
+.track-panel::after {
   content: '';
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.12), transparent 28%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
+  background: linear-gradient(180deg, rgba(6, 7, 10, 0.8) 0%, transparent 25%, transparent 60%, rgba(6, 7, 10, 0.95) 100%);
   pointer-events: none;
+  z-index: 1;
+}
+
+.track-label {
+  position: relative;
+  z-index: 2;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
 }
 
 .hero-accent-line {
@@ -409,67 +430,16 @@ main {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(255, 59, 48, 0.42), rgba(255, 255, 255, 0.22), transparent);
   opacity: 0.6;
+  z-index: 2;
 }
 
-.car-illustration {
-  position: relative;
-  display: block;
+.hero-image {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
-  min-height: 24rem;
-  margin-top: 1rem;
-  border-radius: 1.6rem;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(255, 59, 48, 0.12), transparent 18%),
-    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.03), transparent 40%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.car-illustration::before,
-.car-illustration::after {
-  content: '';
-  position: absolute;
-  inset: 2rem;
-  border-radius: 1.3rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.car-illustration::after {
-  inset: 4.6rem 3.2rem;
-  border-color: rgba(255, 59, 48, 0.2);
-}
-
-.vehicle-livery {
-  position: absolute;
-  left: 50%;
-  bottom: 3.6rem;
-  display: flex;
-  gap: 0.55rem;
-  transform: translateX(-50%);
-  opacity: 0.8;
-}
-
-.vehicle-livery span {
-  width: 2.2rem;
-  height: 0.22rem;
-  border-radius: 999px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 59, 48, 0.8), rgba(255, 255, 255, 0));
-}
-
-.car-motion {
-  transform-origin: center;
-  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.4));
-}
-
-.car-motion-one {
-  animation: float-car 7s ease-in-out infinite;
-}
-
-.car-motion-two {
-  animation: float-car-soft 9s ease-in-out infinite;
-  animation-delay: -2s;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
 }
 
 .release-stage,
@@ -480,16 +450,18 @@ main {
 }
 
 .build-card {
-  position: absolute;
-  inset: auto 1.25rem 1.25rem;
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.1rem;
-  border-radius: 1.2rem;
-  background: rgba(6, 7, 10, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 1.25rem 1.4rem;
+  border-radius: 1.4rem;
+  background: rgba(12, 14, 20, 0.65);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
 .build-card strong,
@@ -516,7 +488,7 @@ main {
 
 .feature-strip,
 .downloads-section,
-.support-panel {
+.features-panel {
   margin-top: 5rem;
 }
 
@@ -604,22 +576,27 @@ main {
   color: rgba(255, 255, 255, 0.78);
 }
 
-.support-panel {
+.features-panel {
   display: grid;
-  gap: 1rem;
-  padding: 1.6rem;
-  border-radius: 1.9rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 1.5rem;
+  margin-bottom: 5rem;
+  padding: 2.5rem;
+  border-radius: 2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5);
 }
 
 .step-card {
   position: relative;
-  padding: 1.25rem 1.2rem;
-  border-radius: 1.2rem;
+  padding: 1.6rem 1.4rem;
+  border-radius: 1.4rem;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .step-card strong {
@@ -692,26 +669,6 @@ main {
   }
 }
 
-@keyframes float-car {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(-1deg);
-  }
-  50% {
-    transform: translate3d(0, -8px, 0) rotate(1.5deg);
-  }
-}
-
-@keyframes float-car-soft {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) rotate(2deg);
-  }
-  50% {
-    transform: translate3d(0, 10px, 0) rotate(-1.5deg);
-  }
-}
-
 @media (max-width: 1080px) {
   .hero,
   .download-grid,
@@ -743,7 +700,7 @@ main {
 
   .hero-copy h1,
   .section-heading h2,
-  .support-panel h2 {
+  .features-panel h2 {
     max-width: none;
   }
 }

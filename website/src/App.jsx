@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 
 const releaseBaseUrl = 'https://github.com/PI-Prasaad-Krishna/FormulaOne-replayer/releases/latest';
+const issuesUrl = 'https://github.com/PI-Prasaad-Krishna/FormulaOne-replayer/issues';
+const feedbackUrl='https://github.com/PI-Prasaad-Krishna/FormulaOne-replayer/discussions';
 
 const downloads = [
   {
@@ -44,18 +46,18 @@ const highlights = [
   },
 ];
 
-const simpleSteps = [
+const features = [
   {
-    title: 'Choose your platform',
-    text: 'Pick Windows, macOS, or Linux from the download cards below.',
+    title: 'Immersive Real-Time Telemetry',
+    text: 'Experience race data live. Track speed, gears, and braking with stunning visualization widgets.',
   },
   {
-    title: 'Open the release page',
-    text: 'Each button takes you to the official GitHub release for the latest build.',
+    title: 'Cross-Platform Performance',
+    text: 'Optimized flawlessly for Windows, macOS, and Linux to deliver a butter-smooth 60fps experience.',
   },
   {
-    title: 'Install when ready',
-    text: 'The installer files will be published there as soon as they are available.',
+    title: 'Premium Dark-Mode Aesthetics',
+    text: 'Built with a sleek, aerodynamic interface featuring dynamic glassmorphism and neon racing accents.',
   },
 ];
 
@@ -105,7 +107,9 @@ function App() {
 
         <nav className="nav">
           <a href="#downloads">Download</a>
-          <a href="#support">Support</a>
+          <a href="#features">Features</a>
+          <a href={issuesUrl} target="_blank" rel="noreferrer" title="Report issues">Report Issues</a>
+          <a href={feedbackUrl} target="_blank" rel="noreferrer" title="Provide feedback">Feedback</a>
         </nav>
 
         <a className="release-pill" href={releaseBaseUrl} target="_blank" rel="noreferrer">
@@ -146,40 +150,7 @@ function App() {
             <div className="track-panel vehicle-panel">
               <div className="track-label">Formula 1-inspired styling</div>
               <div className="hero-accent-line" aria-hidden="true" />
-              <svg className="car-illustration" viewBox="0 0 720 420" role="img" aria-label="Formula One style race car illustration">
-                <defs>
-                  <linearGradient id="carBody" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#ffffff" />
-                    <stop offset="42%" stopColor="#f4f4f4" />
-                    <stop offset="100%" stopColor="#b8b8b8" />
-                  </linearGradient>
-                  <linearGradient id="carRed" x1="0" x2="1" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#ff5a4f" />
-                    <stop offset="100%" stopColor="#b91208" />
-                  </linearGradient>
-                </defs>
-                <g opacity="0.22">
-                  <path d="M100 308c124-26 252-26 420 0" fill="none" stroke="#ffffff" strokeWidth="6" strokeLinecap="round" />
-                  <path d="M88 232c153-68 363-68 532 0" fill="none" stroke="#ffffff" strokeOpacity="0.16" strokeWidth="8" strokeLinecap="round" />
-                </g>
-                <g className="car-motion car-motion-one">
-                  <path d="M186 240c-10-16 7-33 32-33h104l17-23h74c26 0 52 13 65 32l10 15h-54l-11 16h-78l-15 19H250c-23 0-50-10-64-26Z" fill="url(#carBody)" />
-                  <path d="M270 188h130l27 38h-84l-13-18h-61z" fill="url(#carRed)" />
-                  <path d="M169 250h61l-18 26h-34c-16 0-26-10-26-24 0-1 0-2 1-2 3 0 9 0 16 0Z" fill="#ffffff" />
-                  <path d="M456 238h64l15 18h-36l-17-20z" fill="#ffffff" />
-                  <circle cx="230" cy="270" r="39" fill="#111318" />
-                  <circle cx="230" cy="270" r="20" fill="#f7f7f7" />
-                  <circle cx="475" cy="270" r="39" fill="#111318" />
-                  <circle cx="475" cy="270" r="20" fill="#f7f7f7" />
-                  <circle cx="336" cy="225" r="10" fill="#ffffff" opacity="0.9" />
-                </g>
-                <g className="car-motion car-motion-two">
-                  <path d="M218 154h86l17-13h82c18 0 34 11 40 26l2 6h-44l-8 10h-60l-14 15h-71c-18 0-31-13-31-28 0-7 1-13 1-16Z" fill="url(#carBody)" opacity="0.82" />
-                  <path d="M286 138h90l15 24h-64l-9-12h-40z" fill="url(#carRed)" opacity="0.85" />
-                  <circle cx="248" cy="196" r="22" fill="#111318" opacity="0.85" />
-                  <circle cx="420" cy="196" r="22" fill="#111318" opacity="0.85" />
-                </g>
-              </svg>
+              <img src="/hero-bg.png" className="hero-image" alt="Formula One style race car illustration" />
 
               <div className="vehicle-livery" aria-hidden="true">
                 <span />
@@ -241,17 +212,17 @@ function App() {
           </div>
         </section>
 
-        <section className="support-panel" id="support" data-reveal>
+        <section className="features-panel" id="features" data-reveal>
           <div>
-            <span className="eyebrow">Need help</span>
-            <h2>Choose the platform you use and open the latest release.</h2>
+            <span className="eyebrow">Engineered for Performance</span>
+            <h2>Everything you need to immerse yourself in the race.</h2>
           </div>
 
           <div className="step-grid">
-            {simpleSteps.map((step) => (
-              <div key={step.title} className="step-card">
-                <strong>{step.title}</strong>
-                <p>{step.text}</p>
+            {features.map((feature) => (
+              <div key={feature.title} className="step-card">
+                <strong>{feature.title}</strong>
+                <p>{feature.text}</p>
               </div>
             ))}
           </div>
