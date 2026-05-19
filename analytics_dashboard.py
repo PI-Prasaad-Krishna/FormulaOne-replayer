@@ -21,6 +21,80 @@ import threading
 import os
 from scipy.interpolate import splprep, splev
 
+def cache_event_name_from_folder(folder_name):
+    if "_" not in folder_name:
+        return folder_name.replace("_", " ")
+    parts = folder_name.split("_", 1)
+    if len(parts) != 2:
+        return folder_name.replace("_", " ")
+    return parts[1].replace("_", " ")
+
+def get_cached_events_for_year(year):
+    year_dir = os.path.join("f1_cache", str(year))
+    if not os.path.isdir(year_dir):
+        return []
+    events = []
+    seen = set()
+    try:
+        for entry in sorted(os.listdir(year_dir)):
+            event_dir = os.path.join(year_dir, entry)
+            if not os.path.isdir(event_dir):
+                continue
+            for session_dir in os.listdir(event_dir):
+                if not session_dir.endswith("_Race"):
+                    continue
+                event_name = cache_event_name_from_folder(entry)
+                if event_name not in seen:
+                    seen.add(event_name)
+                    events.append(event_name)
+                break
+    except Exception:
+        return []
+    return events
+
+def get_cached_years_with_races():
+    cache_root = "f1_cache"
+    if not os.path.isdir(cache_root):
+        return []
+    years = []
+    try:
+        for entry in sorted(os.listdir(cache_root), reverse=True):
+            if not entry.isdigit():
+                continue
+            year_dir = os.path.join(cache_root, entry)
+            if not os.path.isdir(year_dir):
+                continue
+            has_race = False
+            for event_entry in os.listdir(year_dir):
+                event_dir = os.path.join(year_dir, event_entry)
+                if not os.path.isdir(event_dir):
+                    continue
+                for session_dir in os.listdir(event_dir):
+                    if session_dir.endswith("_Race"):
+                        has_race = True
+                        break
+                if has_race:
+                    break
+            if has_race:
+                years.append(entry)
+    except Exception:
+        return []
+    return years
+
+def build_driver_label(driver_code, session_or_telemetry):
+    # session_or_telemetry may be a FastF1 session or telemetry dict; try to extract team if possible
+    try:
+        if hasattr(session_or_telemetry, 'laps'):
+            laps = session_or_telemetry.laps
+            drv_laps = laps[laps['Driver'] == driver_code]
+            if not drv_laps.empty and 'Team' in drv_laps.columns:
+                team = drv_laps.iloc[0]['Team']
+                if pd.notna(team):
+                    return f"{driver_code} - {team}"
+    except Exception:
+        pass
+    return driver_code
+
 # Configure appearance
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -37,6 +111,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.is_running = True
+        self.loaded_driver_codes = []
 
         # --- 3D Camera State ---
         self.cam_azim = -60.0
@@ -68,6 +143,8 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.event_var = ctk.StringVar(value="Loading...")
         self.circuit_combo = ctk.CTkComboBox(self.sidebar, values=["Loading..."], variable=self.event_var)
         self.circuit_combo.pack(padx=20, pady=(0, 20), fill="x")
+
+        self.offline_mode_detected = False
         
         ctk.CTkLabel(self.sidebar, text="PAGES", font=("Roboto", 12, "bold"), text_color="gray").pack(padx=20, anchor="w", pady=(10, 5))
         
@@ -134,7 +211,80 @@ class AnalyticsDashboardApp(ctk.CTk):
             self.after(0, self._update_circuit_dropdown, circuits)
         except Exception as e:
             print(f"Error fetching schedule for {year}: {e}")
-            self.after(0, self._update_circuit_dropdown, ["Error loading"])
+            self.offline_mode_detected = True
+            cached_events = get_cached_events_for_year(year)
+            if cached_events:
+                cached_years = get_cached_years_with_races()
+                if cached_years:
+                    self.after(0, self._update_year_dropdown_offline, cached_years, str(year))
+                self.after(0, self._update_circuit_dropdown, cached_events)
+            else:
+                self.after(0, self._update_circuit_dropdown, ["Error loading"])
+
+    def _update_year_dropdown_offline(self, cached_years, requested_year):
+        self.year_combo.configure(values=cached_years)
+        if requested_year in cached_years:
+            self.year_var.set(requested_year)
+        elif cached_years:
+            self.year_var.set(cached_years[0])
+
+    def on_driver_changed(self, choice):
+        # legacy sidebar driver handler removed; kept for compatibility if invoked elsewhere
+        try:
+            if choice == "LEADER" or choice == "Not Available":
+                return
+            driver_code = choice.split(" - ", 1)[0].strip()
+            return driver_code
+        except Exception:
+            return None
+
+    def _update_driver_dropdown(self, driver_codes, session_or_telemetry=None):
+        # Sidebar driver dropdown removed; keep function as no-op compatibility
+        return
+
+    def populate_drivers_from_session(self, session):
+        try:
+            drivers = sorted(pd.unique(session.laps['Driver']))
+            self.loaded_driver_codes = drivers
+            # Use driver codes only for page-level dropdowns
+            values = drivers
+            def do_update():
+                try:
+                    self._apply_driver_values_to_dropdowns(values)
+                except Exception:
+                    pass
+            self.after(0, do_update)
+        except Exception as e:
+            print(f"Could not populate drivers: {e}")
+
+    def _apply_driver_values_to_dropdowns(self, drivers):
+        def configure_pair(combo_name_1, var_name_1, combo_name_2, var_name_2):
+            combo_1 = getattr(self, combo_name_1, None)
+            combo_2 = getattr(self, combo_name_2, None)
+            var_1 = getattr(self, var_name_1, None)
+            var_2 = getattr(self, var_name_2, None)
+
+            if combo_1 is not None:
+                combo_1.configure(values=drivers)
+            if combo_2 is not None:
+                combo_2.configure(values=drivers)
+
+            if not drivers:
+                return
+
+            if var_1 is not None and var_1.get() not in drivers:
+                var_1.set(drivers[0])
+            if var_2 is not None and var_2.get() not in drivers:
+                var_2.set(drivers[1] if len(drivers) > 1 else drivers[0])
+
+        configure_pair('d1_combo', 'd1_var', 'd2_combo', 'd2_var')
+        configure_pair('dom_d1_combo', 'dom_d1_var', 'dom_d2_combo', 'dom_d2_var')
+        configure_pair('rl_d1_combo', 'rl_d1_var', 'rl_d2_combo', 'rl_d2_var')
+        configure_pair('tyre_d1_combo', 'tyre_d1_var', 'tyre_d2_combo', 'tyre_d2_var')
+
+    def _sync_loaded_driver_dropdowns(self):
+        if self.loaded_driver_codes:
+            self._apply_driver_values_to_dropdowns(self.loaded_driver_codes)
 
     def _update_circuit_dropdown(self, circuits):
         """Runs on main thread to update Tkinter widgets safely."""
@@ -243,8 +393,19 @@ class AnalyticsDashboardApp(ctk.CTk):
                         # Safer to reset to allow online checks next time
                         fastf1.Cache.offline_mode(enabled=False)
                 
-                # Success callback
-                self.after(0, lambda: callback(session))
+                # Success callback: call the page callback and also populate page-level driver dropdowns
+                def _on_success(s=session):
+                    try:
+                        callback(s)
+                    except Exception as _:
+                        # Ensure populate still runs even if callback raises
+                        pass
+                    try:
+                        self.populate_drivers_from_session(s)
+                    except Exception:
+                        pass
+
+                self.after(0, _on_success)
                 
             except Exception as e:
                 print(f"Background Load Error: {e}")
@@ -304,9 +465,12 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         ctk.CTkOptionMenu(controls, variable=self.tel_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=10)
         
-        ctk.CTkEntry(controls, textvariable=self.d1_var, width=60).pack(side="left", padx=10)
+        # Driver compare dropdowns (populated after session load)
+        self.d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.d1_var, width=80)
+        self.d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        ctk.CTkEntry(controls, textvariable=self.d2_var, width=60).pack(side="left", padx=10)
+        self.d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.d2_var, width=80)
+        self.d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Fastest Lap", command=self.plot_telemetry, fg_color="#E10600").pack(side="left", padx=20)
         self.btn_play = ctk.CTkButton(controls, text="Play Replay", command=self.toggle_telemetry_animation, fg_color="#333", width=100, state="disabled")
@@ -314,6 +478,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.telemetry_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.telemetry_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._sync_loaded_driver_dropdowns()
         
     def plot_telemetry(self):
         """ Phase 1: Initiation """
@@ -361,6 +526,20 @@ class AnalyticsDashboardApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Error", f"Analysis error: {e}")
             return
+        # Populate driver dropdowns with available driver codes only
+        try:
+            drivers = sorted(pd.unique(session.laps['Driver']))
+            if drivers:
+                self.d1_combo.configure(values=drivers)
+                self.d2_combo.configure(values=drivers)
+                # Ensure current selected values are valid; fall back to first driver
+                if d1 not in drivers:
+                    self.d1_var.set(drivers[0])
+                if d2 not in drivers:
+                    # pick the next driver if possible, otherwise the first
+                    self.d2_var.set(drivers[1] if len(drivers) > 1 else drivers[0])
+        except Exception:
+            pass
         
         # Plot
         for widget in self.telemetry_frame.winfo_children(): widget.destroy()
@@ -607,16 +786,20 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.dom_d1_var = ctk.StringVar(value="VER")
         self.dom_d2_var = ctk.StringVar(value="HAM")
         
+        # Driver dropdowns for dominance (code-only values populated from session)
         ctk.CTkLabel(dom_frame, text="Dominance:").pack(side="left", padx=5)
-        ctk.CTkEntry(dom_frame, textvariable=self.dom_d1_var, width=50).pack(side="left", padx=5)
+        self.dom_d1_combo = ctk.CTkComboBox(dom_frame, values=["VER"], variable=self.dom_d1_var, width=80)
+        self.dom_d1_combo.pack(side="left", padx=5)
         ctk.CTkLabel(dom_frame, text="vs").pack(side="left", padx=5)
-        ctk.CTkEntry(dom_frame, textvariable=self.dom_d2_var, width=50).pack(side="left", padx=5)
+        self.dom_d2_combo = ctk.CTkComboBox(dom_frame, values=["HAM"], variable=self.dom_d2_var, width=80)
+        self.dom_d2_combo.pack(side="left", padx=5)
         
         ctk.CTkButton(dom_frame, text="Show Dominance", command=self.plot_track_dominance, fg_color="#FF8700").pack(side="left", padx=10)
         ctk.CTkButton(dom_frame, text="Battle Map (Gap)", command=self.plot_battle_map, fg_color="#9B59B6").pack(side="left", padx=10)
         
         self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._sync_loaded_driver_dropdowns()
 
     def plot_gear_map(self):
         try:
@@ -1085,9 +1268,12 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.rl_d1_var = ctk.StringVar(value="VER")
         self.rl_d2_var = ctk.StringVar(value="HAM")
         
-        ctk.CTkEntry(controls, textvariable=self.rl_d1_var, width=60).pack(side="left", padx=10)
+        # Race lines driver dropdowns
+        self.rl_d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.rl_d1_var, width=80)
+        self.rl_d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        ctk.CTkEntry(controls, textvariable=self.rl_d2_var, width=60).pack(side="left", padx=10)
+        self.rl_d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.rl_d2_var, width=80)
+        self.rl_d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Race Lines", command=self.plot_race_lines, fg_color="#E10600").pack(side="left", padx=20)
         
@@ -1095,6 +1281,7 @@ class AnalyticsDashboardApp(ctk.CTk):
 
         self.race_lines_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.race_lines_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._sync_loaded_driver_dropdowns()
         
     def smooth_track_data(self, x, y, s=None, n_points=None):
         """Smooths track data using B-spline interpolation."""
@@ -1381,14 +1568,18 @@ class AnalyticsDashboardApp(ctk.CTk):
         self.tyre_d1_var = ctk.StringVar(value="VER")
         self.tyre_d2_var = ctk.StringVar(value="HAM")
         
-        ctk.CTkEntry(controls, textvariable=self.tyre_d1_var, width=60).pack(side="left", padx=10)
+        # Tyre degradation driver dropdowns
+        self.tyre_d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.tyre_d1_var, width=80)
+        self.tyre_d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        ctk.CTkEntry(controls, textvariable=self.tyre_d2_var, width=60).pack(side="left", padx=10)
+        self.tyre_d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.tyre_d2_var, width=80)
+        self.tyre_d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Degradation", command=self.plot_tyre_degradation, fg_color="#E10600").pack(side="left", padx=20)
         
         self.tyre_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
         self.tyre_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self._sync_loaded_driver_dropdowns()
 
     def plot_tyre_degradation(self):
         try:
@@ -1579,28 +1770,6 @@ class AnalyticsDashboardApp(ctk.CTk):
         
         self.track_ax.set_xlim(center_x - new_span_x/2, center_x + new_span_x/2)
         self.track_ax.set_ylim(center_y - new_span_y/2, center_y + new_span_y/2)
-
-    def create_track_info_page(self):
-        ctk.CTkLabel(self.content_area, text="Detailed Track Info", font=("Roboto", 24, "bold")).pack(pady=10)
-        
-        controls = ctk.CTkFrame(self.content_area)
-        controls.pack(pady=10)
-        
-        self.track_session_var = ctk.StringVar(value="Race")
-        ctk.CTkOptionMenu(controls, variable=self.track_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=5)
-        
-        ctk.CTkButton(controls, text="Generate Map", command=self.plot_track_info, fg_color="#3498DB").pack(side="left", padx=10)
-        
-
-        
-        self.track_frame = ctk.CTkFrame(self.content_area, fg_color="transparent")
-        self.track_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        # REMOVED 3D Toggle Switch
-        
-        self.track_frame = ctk.CTkFrame(self.content_area, fg_color="#121212")
-        self.track_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        self.add_placeholder_plot("Track Map Area")
 
     def plot_track_info(self):
         """ Plot Color-Coded 2D Track Map (S1=Red, S2=Blue, S3=Yellow) """

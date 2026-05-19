@@ -66,6 +66,90 @@ def get_driver_color(driver_code, session=None):
     except:
         return "#ffffff"
 
+def cache_event_name_from_folder(folder_name):
+    """Convert a cached FastF1 event folder into a readable event name."""
+    if "_" not in folder_name:
+        return folder_name.replace("_", " ")
+
+    parts = folder_name.split("_", 1)
+    if len(parts) != 2:
+        return folder_name.replace("_", " ")
+
+    return parts[1].replace("_", " ")
+
+def get_cached_events_for_year(year):
+    """Return cached event names for a given year when online schedules are unavailable."""
+    year_dir = os.path.join("f1_cache", str(year))
+    if not os.path.isdir(year_dir):
+        return []
+
+    events = []
+    seen = set()
+
+    try:
+        for entry in sorted(os.listdir(year_dir)):
+            event_dir = os.path.join(year_dir, entry)
+            if not os.path.isdir(event_dir):
+                continue
+
+            for session_dir in os.listdir(event_dir):
+                if not session_dir.endswith("_Race"):
+                    continue
+
+                event_name = cache_event_name_from_folder(entry)
+                if event_name not in seen:
+                    seen.add(event_name)
+                    events.append(event_name)
+                break
+    except Exception:
+        return []
+
+    return events
+
+def get_cached_years_with_races():
+    """Return cached years that contain at least one race session."""
+    cache_root = "f1_cache"
+    if not os.path.isdir(cache_root):
+        return []
+
+    years = []
+    try:
+        for entry in sorted(os.listdir(cache_root), reverse=True):
+            if not entry.isdigit():
+                continue
+
+            year_dir = os.path.join(cache_root, entry)
+            if not os.path.isdir(year_dir):
+                continue
+
+            has_race = False
+            for event_entry in os.listdir(year_dir):
+                event_dir = os.path.join(year_dir, event_entry)
+                if not os.path.isdir(event_dir):
+                    continue
+
+                for session_dir in os.listdir(event_dir):
+                    if session_dir.endswith("_Race"):
+                        has_race = True
+                        break
+
+                if has_race:
+                    break
+
+            if has_race:
+                years.append(entry)
+    except Exception:
+        return []
+
+    return years
+
+def build_driver_label(driver_code, telemetry_data):
+    data = telemetry_data.get(driver_code, {})
+    team = data.get("Team", "")
+    if team and team != "Unknown":
+        return f"{driver_code} - {team}"
+    return driver_code
+
 def load_race_data(year, circuit, session_type="R"):
     print(f"Loading {year} {circuit} [{session_type}] session data...")
     
@@ -534,6 +618,7 @@ class RaceReplayerApp(ctk.CTk):
         # State for Selection
         self.selected_driver = None
         self.leaderboard_data_ref = [] # To store current frame's leaderboard order
+        self.offline_mode_detected = False
         
         # Animation State
         self.anim = None
@@ -541,7 +626,7 @@ class RaceReplayerApp(ctk.CTk):
 
 
         self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
 
         # -- 1. Header / Controls --
         self.control_frame = ctk.CTkFrame(self, height=60, corner_radius=0)
@@ -560,6 +645,11 @@ class RaceReplayerApp(ctk.CTk):
         self.circuit_var = ctk.StringVar(value="Loading...")
         self.circuit_combo = ctk.CTkComboBox(self.control_frame, values=["Loading..."], variable=self.circuit_var, width=180)
         self.circuit_combo.pack(side="left", padx=5)
+
+        ctk.CTkLabel(self.control_frame, text="Driver:", font=("Roboto", 14)).pack(side="left", padx=(20, 5))
+        self.driver_var = ctk.StringVar(value="LEADER")
+        self.driver_combo = ctk.CTkComboBox(self.control_frame, values=["LEADER"], variable=self.driver_var, width=180, command=self.on_driver_changed)
+        self.driver_combo.pack(side="left", padx=5)
         
         self.load_btn = ctk.CTkButton(self.control_frame, text="LOAD RACE", command=self.start_replay, fg_color="#E10600", font=("Roboto", 12, "bold"))
         self.load_btn.pack(side="left", padx=20)
@@ -584,18 +674,21 @@ class RaceReplayerApp(ctk.CTk):
         self.switch_3d.pack(side="right", padx=20)
 
         # -- 1.1 Session Info Panel (Weather & Status) --
-        self.session_info_frame = ctk.CTkFrame(self.control_frame, fg_color="transparent")
+        self.session_info_bar = ctk.CTkFrame(self, height=34, corner_radius=0)
+        self.session_info_bar.grid(row=1, column=0, columnspan=3, sticky="ew", padx=0, pady=0)
+
+        self.session_info_frame = ctk.CTkFrame(self.session_info_bar, fg_color="transparent")
         self.session_info_frame.pack(side="right", padx=20)
         
         self.weather_lbl = ctk.CTkLabel(self.session_info_frame, text="Weather: --°C | --%", font=("Mono", 12))
-        self.weather_lbl.pack(side="top", anchor="e")
+        self.weather_lbl.pack(side="left", padx=(0, 18))
         
         self.track_status_lbl = ctk.CTkLabel(self.session_info_frame, text="TRACK: GREEN", font=("Roboto", 12, "bold"), text_color="#2CC985")
-        self.track_status_lbl.pack(side="bottom", anchor="e")
+        self.track_status_lbl.pack(side="left")
 
         # -- 2. Leaderboard (Left Side) --
         self.leaderboard_frame = ctk.CTkFrame(self, width=400, corner_radius=0) # Widened
-        self.leaderboard_frame.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self.leaderboard_frame.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         
         ctk.CTkLabel(self.leaderboard_frame, text="LEADERBOARD", font=("Roboto", 16, "bold"), text_color="#E10600").pack(pady=(15,10))
         
@@ -643,7 +736,7 @@ class RaceReplayerApp(ctk.CTk):
             
         # -- 3. Map Canvas (Center/Right) --
         self.map_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="#121212")
-        self.map_frame.grid(row=1, column=1, columnspan=2, sticky="nsew")
+        self.map_frame.grid(row=2, column=1, columnspan=2, sticky="nsew")
         
         plt.style.use('dark_background')
         self.fig, self.ax = plt.subplots(figsize=(8, 6), facecolor='#121212')
@@ -724,7 +817,24 @@ class RaceReplayerApp(ctk.CTk):
             self.after(0, self._update_circuit_dropdown, circuits)
         except Exception as e:
             print(f"Error fetching schedule for {year}: {e}")
-            self.after(0, self._update_circuit_dropdown, ["Error loading"])
+            self.offline_mode_detected = True
+            cached_events = get_cached_events_for_year(year)
+            if cached_events:
+                cached_years = get_cached_years_with_races()
+                if cached_years:
+                    self.after(0, self._update_year_dropdown_offline, cached_years, str(year))
+                self.after(0, self._update_circuit_dropdown, cached_events)
+            else:
+                self.after(0, self._update_circuit_dropdown, ["Error loading"])
+
+    def _update_year_dropdown_offline(self, cached_years, requested_year):
+        """Switch the year dropdown to cache-backed years when offline."""
+        self.year_combo.configure(values=cached_years)
+
+        if requested_year in cached_years:
+            self.year_var.set(requested_year)
+        elif cached_years:
+            self.year_var.set(cached_years[0])
 
     def _update_circuit_dropdown(self, circuits):
         """Runs on main thread to update Tkinter widgets safely."""
@@ -733,6 +843,40 @@ class RaceReplayerApp(ctk.CTk):
             self.circuit_var.set(circuits[-1]) # Default to last race of the year (usually most interesting)
         else:
             self.circuit_var.set("Not Available")
+
+    def on_driver_changed(self, choice):
+        """Update the selected driver from the driver dropdown."""
+        if choice == "LEADER" or choice == "Not Available":
+            self.selected_driver = None
+            self.driver_var.set("LEADER")
+            return
+
+        driver_code = choice.split(" - ", 1)[0].strip()
+        if driver_code in self.telemetry_data:
+            self.selected_driver = driver_code
+        else:
+            self.selected_driver = None
+            self.driver_var.set("LEADER")
+
+    def _update_driver_dropdown(self):
+        """Populate driver dropdown after a session has been loaded."""
+        driver_codes = list(self.telemetry_data.keys()) if self.telemetry_data else []
+        if not driver_codes:
+            self.driver_combo.configure(state="disabled", values=["LEADER"])
+            self.driver_var.set("LEADER")
+            self.selected_driver = None
+            return
+
+        driver_codes.sort()
+        driver_labels = ["LEADER"] + [build_driver_label(driver_code, self.telemetry_data) for driver_code in driver_codes]
+        self.driver_combo.configure(state="normal", values=driver_labels)
+
+        if self.selected_driver in self.telemetry_data:
+            selected_label = build_driver_label(self.selected_driver, self.telemetry_data)
+            self.driver_var.set(selected_label)
+        else:
+            self.selected_driver = None
+            self.driver_var.set("LEADER")
 
     def on_cam_press(self, event):
         if not self.is_3d_mode.get(): return
@@ -806,6 +950,11 @@ class RaceReplayerApp(ctk.CTk):
             # Select
             self.selected_driver = clicked_driver
             print(f"[Selection] Selected {clicked_driver}")
+
+        if self.selected_driver and self.selected_driver in self.telemetry_data:
+            self.driver_var.set(build_driver_label(self.selected_driver, self.telemetry_data))
+        else:
+            self.driver_var.set("LEADER")
             
         # Force update will happen next frame, or we could force it here if paused.
         # If paused, we might want to manually refresh HUD:
@@ -952,6 +1101,8 @@ class RaceReplayerApp(ctk.CTk):
         (self.telemetry_data, self.common_time, self.lap_start_times, self.lap_numbers, 
          self.race_start_offset, self.weather_data, self.track_status_data, 
          self.global_start_time, self.lap_sector_data, self.pit_lane_path) = data
+
+        self._update_driver_dropdown()
              
         self.setup_plot()
         self.start_animation(start_frame=int(self.race_start_offset / 0.2))
