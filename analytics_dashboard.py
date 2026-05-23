@@ -265,9 +265,15 @@ class AnalyticsDashboardApp(ctk.CTk):
             var_2 = getattr(self, var_name_2, None)
 
             if combo_1 is not None:
-                combo_1.configure(values=drivers)
+                try:
+                    combo_1.configure(values=drivers)
+                except Exception:
+                    pass
             if combo_2 is not None:
-                combo_2.configure(values=drivers)
+                try:
+                    combo_2.configure(values=drivers)
+                except Exception:
+                    pass
 
             if not drivers:
                 return
@@ -459,17 +465,20 @@ class AnalyticsDashboardApp(ctk.CTk):
         controls = ctk.CTkFrame(self.content_area)
         controls.pack(pady=10)
         
-        self.d1_var = ctk.StringVar(value="VER")
-        self.d2_var = ctk.StringVar(value="HAM")
+        initial_d1 = self.loaded_driver_codes[0] if self.loaded_driver_codes else "Select Driver"
+        initial_d2 = self.loaded_driver_codes[1] if len(self.loaded_driver_codes) > 1 else initial_d1
+        
+        self.d1_var = ctk.StringVar(value=initial_d1)
+        self.d2_var = ctk.StringVar(value=initial_d2)
         self.tel_session_var = ctk.StringVar(value="Race")
         
         ctk.CTkOptionMenu(controls, variable=self.tel_session_var, values=["Race", "Qualifying"], width=100, fg_color="#333", button_color="#444").pack(side="left", padx=10)
         
         # Driver compare dropdowns (populated after session load)
-        self.d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.d1_var, width=80)
+        self.d1_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.d1_var, width=80)
         self.d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        self.d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.d2_var, width=80)
+        self.d2_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.d2_var, width=80)
         self.d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Fastest Lap", command=self.plot_telemetry, fg_color="#E10600").pack(side="left", padx=20)
@@ -501,6 +510,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.d1_var.get().upper()
         d2 = self.d2_var.get().upper()
         
+        # Validate against session drivers
+        drivers = sorted(pd.unique(session.laps['Driver']))
+        if drivers:
+            if d1 not in drivers:
+                d1 = drivers[0]
+                self.d1_var.set(d1)
+            if d2 not in drivers:
+                d2 = drivers[1] if len(drivers) > 1 else drivers[0]
+                self.d2_var.set(d2)
+
         try:
             laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
             laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
@@ -526,20 +545,6 @@ class AnalyticsDashboardApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Error", f"Analysis error: {e}")
             return
-        # Populate driver dropdowns with available driver codes only
-        try:
-            drivers = sorted(pd.unique(session.laps['Driver']))
-            if drivers:
-                self.d1_combo.configure(values=drivers)
-                self.d2_combo.configure(values=drivers)
-                # Ensure current selected values are valid; fall back to first driver
-                if d1 not in drivers:
-                    self.d1_var.set(drivers[0])
-                if d2 not in drivers:
-                    # pick the next driver if possible, otherwise the first
-                    self.d2_var.set(drivers[1] if len(drivers) > 1 else drivers[0])
-        except Exception:
-            pass
         
         # Plot
         for widget in self.telemetry_frame.winfo_children(): widget.destroy()
@@ -783,15 +788,18 @@ class AnalyticsDashboardApp(ctk.CTk):
         dom_frame = ctk.CTkFrame(self.content_area)
         dom_frame.pack(pady=5)
         
-        self.dom_d1_var = ctk.StringVar(value="VER")
-        self.dom_d2_var = ctk.StringVar(value="HAM")
+        initial_d1 = self.loaded_driver_codes[0] if self.loaded_driver_codes else "Select Driver"
+        initial_d2 = self.loaded_driver_codes[1] if len(self.loaded_driver_codes) > 1 else initial_d1
         
-        # Driver dropdowns for dominance (code-only values populated from session)
+        self.dom_d1_var = ctk.StringVar(value=initial_d1)
+        self.dom_d2_var = ctk.StringVar(value=initial_d2)
+        
+        # Driver dropdowns for dominance (populated from session)
         ctk.CTkLabel(dom_frame, text="Dominance:").pack(side="left", padx=5)
-        self.dom_d1_combo = ctk.CTkComboBox(dom_frame, values=["VER"], variable=self.dom_d1_var, width=80)
+        self.dom_d1_combo = ctk.CTkComboBox(dom_frame, values=self.loaded_driver_codes or ["Select Driver"], variable=self.dom_d1_var, width=80)
         self.dom_d1_combo.pack(side="left", padx=5)
         ctk.CTkLabel(dom_frame, text="vs").pack(side="left", padx=5)
-        self.dom_d2_combo = ctk.CTkComboBox(dom_frame, values=["HAM"], variable=self.dom_d2_var, width=80)
+        self.dom_d2_combo = ctk.CTkComboBox(dom_frame, values=self.loaded_driver_codes or ["Select Driver"], variable=self.dom_d2_var, width=80)
         self.dom_d2_combo.pack(side="left", padx=5)
         
         ctk.CTkButton(dom_frame, text="Show Dominance", command=self.plot_track_dominance, fg_color="#FF8700").pack(side="left", padx=10)
@@ -918,6 +926,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.dom_d1_var.get().upper()
         d2 = self.dom_d2_var.get().upper()
         
+        # Validate against session drivers
+        drivers = sorted(pd.unique(session.laps['Driver']))
+        if drivers:
+            if d1 not in drivers:
+                d1 = drivers[0]
+                self.dom_d1_var.set(d1)
+            if d2 not in drivers:
+                d2 = drivers[1] if len(drivers) > 1 else drivers[0]
+                self.dom_d2_var.set(d2)
+
         # We need session_type for the title, let's just infer/get it again or pass it. 
         # Actually it's cleaner to read from self again since it's on main thread now.
         session_type = self.track_session_var.get()
@@ -1026,6 +1044,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.dom_d1_var.get().upper()
         d2 = self.dom_d2_var.get().upper()
         
+        # Validate against session drivers
+        drivers = sorted(pd.unique(session.laps['Driver']))
+        if drivers:
+            if d1 not in drivers:
+                d1 = drivers[0]
+                self.dom_d1_var.set(d1)
+            if d2 not in drivers:
+                d2 = drivers[1] if len(drivers) > 1 else drivers[0]
+                self.dom_d2_var.set(d2)
+
         try:
             laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
             laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
@@ -1265,14 +1293,17 @@ class AnalyticsDashboardApp(ctk.CTk):
         controls = ctk.CTkFrame(self.content_area)
         controls.pack(pady=10)
         
-        self.rl_d1_var = ctk.StringVar(value="VER")
-        self.rl_d2_var = ctk.StringVar(value="HAM")
+        initial_d1 = self.loaded_driver_codes[0] if self.loaded_driver_codes else "Select Driver"
+        initial_d2 = self.loaded_driver_codes[1] if len(self.loaded_driver_codes) > 1 else initial_d1
+        
+        self.rl_d1_var = ctk.StringVar(value=initial_d1)
+        self.rl_d2_var = ctk.StringVar(value=initial_d2)
         
         # Race lines driver dropdowns
-        self.rl_d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.rl_d1_var, width=80)
+        self.rl_d1_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.rl_d1_var, width=80)
         self.rl_d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        self.rl_d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.rl_d2_var, width=80)
+        self.rl_d2_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.rl_d2_var, width=80)
         self.rl_d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Race Lines", command=self.plot_race_lines, fg_color="#E10600").pack(side="left", padx=20)
@@ -1372,6 +1403,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.rl_d1_var.get().upper()
         d2 = self.rl_d2_var.get().upper()
         
+        # Validate against session drivers
+        drivers = sorted(pd.unique(session.laps['Driver']))
+        if drivers:
+            if d1 not in drivers:
+                d1 = drivers[0]
+                self.rl_d1_var.set(d1)
+            if d2 not in drivers:
+                d2 = drivers[1] if len(drivers) > 1 else drivers[0]
+                self.rl_d2_var.set(d2)
+
         try:
             laps_d1 = session.laps.pick_drivers(d1).pick_fastest()
             laps_d2 = session.laps.pick_drivers(d2).pick_fastest()
@@ -1565,14 +1606,17 @@ class AnalyticsDashboardApp(ctk.CTk):
         controls = ctk.CTkFrame(self.content_area)
         controls.pack(pady=10)
         
-        self.tyre_d1_var = ctk.StringVar(value="VER")
-        self.tyre_d2_var = ctk.StringVar(value="HAM")
+        initial_d1 = self.loaded_driver_codes[0] if self.loaded_driver_codes else "Select Driver"
+        initial_d2 = self.loaded_driver_codes[1] if len(self.loaded_driver_codes) > 1 else initial_d1
+        
+        self.tyre_d1_var = ctk.StringVar(value=initial_d1)
+        self.tyre_d2_var = ctk.StringVar(value=initial_d2)
         
         # Tyre degradation driver dropdowns
-        self.tyre_d1_combo = ctk.CTkComboBox(controls, values=["VER"], variable=self.tyre_d1_var, width=80)
+        self.tyre_d1_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.tyre_d1_var, width=80)
         self.tyre_d1_combo.pack(side="left", padx=10)
         ctk.CTkLabel(controls, text="VS").pack(side="left", padx=10)
-        self.tyre_d2_combo = ctk.CTkComboBox(controls, values=["HAM"], variable=self.tyre_d2_var, width=80)
+        self.tyre_d2_combo = ctk.CTkComboBox(controls, values=self.loaded_driver_codes or ["Select Driver"], variable=self.tyre_d2_var, width=80)
         self.tyre_d2_combo.pack(side="left", padx=10)
         
         ctk.CTkButton(controls, text="Analyze Degradation", command=self.plot_tyre_degradation, fg_color="#E10600").pack(side="left", padx=20)
@@ -1596,6 +1640,16 @@ class AnalyticsDashboardApp(ctk.CTk):
         d1 = self.tyre_d1_var.get().upper()
         d2 = self.tyre_d2_var.get().upper()
         
+        # Validate against session drivers
+        drivers = sorted(pd.unique(session.laps['Driver']))
+        if drivers:
+            if d1 not in drivers:
+                d1 = drivers[0]
+                self.tyre_d1_var.set(d1)
+            if d2 not in drivers:
+                d2 = drivers[1] if len(drivers) > 1 else drivers[0]
+                self.tyre_d2_var.set(d2)
+
         try:
             # Get laps for both drivers
             laps_d1 = session.laps.pick_drivers(d1)
