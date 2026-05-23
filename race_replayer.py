@@ -29,7 +29,7 @@ import subprocess # Added for Sidecar
 import json # Added for Sidecar
 
 # Configure output for standard text
-if sys.platform.startswith("win"):
+if sys.platform.startswith("win") and sys.stdout is not None:
     import codecs
     sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
 
@@ -613,6 +613,7 @@ class RaceReplayerApp(ctk.CTk):
 
         self.title("F1 Race Replayer 2025 - Modern Edition")
         self.geometry("1400x900")
+        self.state('zoomed')
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         
         # State for Selection
@@ -1147,9 +1148,11 @@ class RaceReplayerApp(ctk.CTk):
         try:
              # Look for the script in the same directory
              viewer_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "f1_3d_viewer.py")
-             if not os.path.exists(viewer_script):
-                 print(f"Error: Could not find {viewer_script}")
-                 return False
+             # In a frozen PyInstaller bundle, the .py file doesn't physically exist on disk
+             if not getattr(sys, 'frozen', False):
+                 if not os.path.exists(viewer_script):
+                     print(f"Error: Could not find {viewer_script}")
+                     return False
                  
              # Launch Subprocess
              # Use the same python executable running this script

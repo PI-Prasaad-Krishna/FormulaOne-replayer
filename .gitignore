@@ -3,3 +3,7 @@ test.py
 /__pycache__
 /test
 /cache
+
+# PyInstaller Build Artifacts
+/build
+/dist

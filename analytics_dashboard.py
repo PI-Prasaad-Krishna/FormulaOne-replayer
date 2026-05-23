@@ -104,6 +104,7 @@ class AnalyticsDashboardApp(ctk.CTk):
         super().__init__()
         self.title("F1 Analytics Dashboard 2025")
         self.geometry("1400x900")
+        self.state('zoomed')
         
         # Grid Layout
         self.grid_columnconfigure(1, weight=1)

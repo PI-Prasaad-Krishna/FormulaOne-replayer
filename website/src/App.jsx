@@ -75,10 +75,10 @@ function App() {
   const downloads = [
     {
       name: 'Windows',
-      filename: `F1 Visualizer Setup (${latestVersion}).msi`,
-      details: `Native setup for Windows 10 & 11. Includes automatic updates and desktop shortcuts. Size: ${getDownloadSize('.msi')}`,
-      badge: 'Recommended',
-      href: getDownloadUrl('.msi'),
+      filename: `F1 Visualizer (${latestVersion}).exe`,
+      details: `Portable standalone executable for Windows 10 & 11. No installation required. Size: ${getDownloadSize('.exe')}`,
+      badge: 'Portable',
+      href: getDownloadUrl('.exe'),
     },
     {
       name: 'macOS',

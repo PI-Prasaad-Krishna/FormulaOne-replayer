@@ -2,6 +2,27 @@ import customtkinter as ctk
 import subprocess
 import sys
 import os
+import multiprocessing
+
+if __name__ == '__main__':
+    multiprocessing.freeze_support()
+    # Intercept subprocess calls when frozen by PyInstaller
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+        if "race_replayer" in arg:
+            from race_replayer import RaceReplayerApp
+            app = RaceReplayerApp()
+            app.mainloop()
+            sys.exit(0)
+        elif "analytics_dashboard" in arg:
+            from analytics_dashboard import AnalyticsDashboardApp
+            app = AnalyticsDashboardApp()
+            app.mainloop()
+            sys.exit(0)
+        elif "f1_3d_viewer" in arg:
+            import f1_3d_viewer
+            f1_3d_viewer.main()
+            sys.exit(0)
 
 # Configure appearance
 ctk.set_appearance_mode("Dark")
@@ -13,6 +34,7 @@ class MainApp(ctk.CTk):
 
         self.title("F1 Visualizer Hub")
         self.geometry("800x600")
+        self.state('zoomed')
         
         # Center the window
         self.grid_columnconfigure(0, weight=1)
