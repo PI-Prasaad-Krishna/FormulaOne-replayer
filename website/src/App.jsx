@@ -79,20 +79,23 @@ function App() {
       details: `Portable standalone executable for Windows 10 & 11. No installation required. Size: ${getDownloadSize('.exe')}`,
       badge: 'Portable',
       href: getDownloadUrl('.exe'),
+      comingSoon: false,
     },
     {
       name: 'macOS',
-      filename: `F1 Visualizer (${latestVersion}).dmg`,
-      details: `Universal build for Apple Silicon and Intel Macs. Clean installation and optimized performance. Size: ${getDownloadSize('.dmg')}`,
+      filename: `F1 Visualizer.dmg`,
+      details: `Universal build for Apple Silicon and Intel Macs. Clean installation and optimized performance.`,
       badge: 'Universal',
-      href: getDownloadUrl('.dmg'),
+      href: '#',
+      comingSoon: true,
     },
     {
       name: 'Linux',
-      filename: `F1 Visualizer (${latestVersion}).AppImage`,
-      details: `Portable AppImage for modern Linux distributions. No installation required. Size: ${getDownloadSize('.AppImage')}`,
+      filename: `F1 Visualizer.AppImage`,
+      details: `Portable AppImage for modern Linux distributions. No installation required.`,
       badge: 'Portable',
-      href: getDownloadUrl('.AppImage'),
+      href: '#',
+      comingSoon: true,
     },
   ];
 
@@ -198,11 +201,12 @@ function App() {
             {downloads.map((item) => (
               <a
                 key={item.name}
-                className="download-card"
+                className={`download-card ${item.comingSoon ? 'coming-soon' : ''}`}
                 href={item.href}
-                target="_blank"
+                target={item.comingSoon ? "_self" : "_blank"}
                 rel="noreferrer"
                 data-reveal
+                style={item.comingSoon ? { pointerEvents: 'none', opacity: 0.6 } : {}}
               >
                 <div className="download-card-top">
                   <span className="download-badge">{item.badge}</span>
@@ -215,12 +219,14 @@ function App() {
                 </div>
 
                 <div className="download-footer">
-                  <span>Download Package</span>
-                  <span aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M13 5l7 7-7 7M20 12H4" />
-                    </svg>
-                  </span>
+                  <span>{item.comingSoon ? "Coming Soon" : "Download Package"}</span>
+                  {!item.comingSoon && (
+                    <span aria-hidden="true">
+                      <svg viewBox="0 0 24 24">
+                        <path d="M13 5l7 7-7 7M20 12H4" />
+                      </svg>
+                    </span>
+                  )}
                 </div>
               </a>
             ))}
