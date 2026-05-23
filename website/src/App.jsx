@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const repoOwner = 'PI-Prasaad-Krishna';
 const repoName = 'FormulaOne-replayer';
