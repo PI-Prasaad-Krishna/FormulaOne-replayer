@@ -1164,18 +1164,18 @@ class RaceReplayerApp(ctk.CTk):
              # Use the same python executable running this script
              python_exe = sys.executable
              
-             # CREATE_NO_WINDOW hides the console black box on windows
-             creationflags = 0
+             kwargs = {
+                 'stdin': subprocess.PIPE,
+                 'stdout': subprocess.PIPE,
+                 'stderr': subprocess.PIPE,
+                 'text': True
+             }
              if sys.platform == "win32":
-                  creationflags = subprocess.CREATE_NO_WINDOW
+                 kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
              
              self.sidecar_process = subprocess.Popen(
                  [python_exe, viewer_script],
-                 stdin=subprocess.PIPE,
-                 stdout=subprocess.PIPE,
-                 stderr=subprocess.PIPE,
-                 text=True,
-                 creationflags=creationflags
+                 **kwargs
              )
              
              # Wait for READY signal or Error
