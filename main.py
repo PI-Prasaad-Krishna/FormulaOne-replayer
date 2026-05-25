@@ -35,13 +35,22 @@ class MainApp(ctk.CTk):
         self.title("F1 Visualizer Hub")
         self.geometry("800x600")
         def maximize_window():
-            try:
-                self.state('zoomed')
-            except Exception:
+            import sys, os
+            if sys.platform.startswith("linux") and os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
                 try:
-                    self.attributes('-zoomed', True)
+                    w = self.winfo_screenwidth()
+                    h = self.winfo_screenheight()
+                    self.geometry(f"{w}x{h}+0+0")
                 except Exception:
                     pass
+            else:
+                try:
+                    self.state('zoomed')
+                except Exception:
+                    try:
+                        self.attributes('-zoomed', True)
+                    except Exception:
+                        pass
         self.after(1, maximize_window)
         
         # Center the window
