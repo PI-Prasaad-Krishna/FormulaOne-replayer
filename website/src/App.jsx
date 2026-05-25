@@ -147,7 +147,7 @@ function App() {
         <section className="hero">
           <div className="hero-copy" data-reveal>
             <div className="eyebrow">Professional Race Telemetry</div>
-            <h1>The ultimate F1 data visualization suite.</h1>
+            <h1>The Ultimate F1 Data Visualization Suite</h1>
             <p>
               Download the cross-platform telemetry dashboard for Windows, macOS, and Linux. Built for deep strategy analysis and real-time head-to-head comparisons.
             </p>
@@ -249,6 +249,19 @@ function App() {
           </div>
         </section>
       </main>
+
+      <footer className="footer">
+        <div className="footer-content">
+          <div className="footer-info">
+            <strong>F1 Visualizer</strong>
+            <p>Open-source telemetry dashboard for F1 fans.</p>
+          </div>
+          <div className="footer-legal">
+            <span>&copy; {new Date().getFullYear()} PI-Prasaad-Krishna. All rights reserved.</span>
+            <span className="privacy-note">Privacy: 100% Local App. No user data is collected, stored, or transmitted.</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
