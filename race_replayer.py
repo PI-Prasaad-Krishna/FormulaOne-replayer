@@ -613,13 +613,15 @@ class RaceReplayerApp(ctk.CTk):
 
         self.title("F1 Race Replayer 2025 - Modern Edition")
         self.geometry("1400x900")
-        try:
-            self.state('zoomed')
-        except Exception:
+        def maximize_window():
             try:
-                self.attributes('-zoomed', True)
+                self.state('zoomed')
             except Exception:
-                pass
+                try:
+                    self.attributes('-zoomed', True)
+                except Exception:
+                    pass
+        self.after(100, maximize_window)
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         
         # State for Selection

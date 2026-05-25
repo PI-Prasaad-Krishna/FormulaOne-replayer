@@ -104,13 +104,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         super().__init__()
         self.title("F1 Analytics Dashboard 2025")
         self.geometry("1400x900")
-        try:
-            self.state('zoomed')
-        except Exception:
+        def maximize_window():
             try:
-                self.attributes('-zoomed', True)
+                self.state('zoomed')
             except Exception:
-                pass
+                try:
+                    self.attributes('-zoomed', True)
+                except Exception:
+                    pass
+        self.after(100, maximize_window)
         
         # Grid Layout
         self.grid_columnconfigure(1, weight=1)

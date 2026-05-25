@@ -34,13 +34,15 @@ class MainApp(ctk.CTk):
 
         self.title("F1 Visualizer Hub")
         self.geometry("800x600")
-        try:
-            self.state('zoomed')
-        except Exception:
+        def maximize_window():
             try:
-                self.attributes('-zoomed', True)
+                self.state('zoomed')
             except Exception:
-                pass
+                try:
+                    self.attributes('-zoomed', True)
+                except Exception:
+                    pass
+        self.after(1, maximize_window)
         
         # Center the window
         self.grid_columnconfigure(0, weight=1)
