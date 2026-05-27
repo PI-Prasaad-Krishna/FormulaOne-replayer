@@ -282,17 +282,6 @@ class AnalyticsDashboardApp(ctk.CTk):
             var_1 = getattr(self, var_name_1, None)
             var_2 = getattr(self, var_name_2, None)
 
-            if combo_1 is not None:
-                try:
-                    combo_1.configure(values=drivers)
-                except Exception:
-                    pass
-            if combo_2 is not None:
-                try:
-                    combo_2.configure(values=drivers)
-                except Exception:
-                    pass
-
             if not drivers:
                 return
 
@@ -300,6 +289,40 @@ class AnalyticsDashboardApp(ctk.CTk):
                 var_1.set(drivers[0])
             if var_2 is not None and var_2.get() not in drivers:
                 var_2.set(drivers[1] if len(drivers) > 1 else drivers[0])
+
+            def update_options(*args):
+                if combo_1 is None or combo_2 is None or var_1 is None or var_2 is None:
+                    return
+                v1 = var_1.get()
+                v2 = var_2.get()
+                
+                if v1 == v2 and len(drivers) > 1:
+                    v2 = next((d for d in drivers if d != v1), drivers[1])
+                    var_2.set(v2)
+                
+                opts1 = [d for d in drivers if d != v2]
+                opts2 = [d for d in drivers if d != v1]
+                
+                if not opts1: opts1 = drivers
+                if not opts2: opts2 = drivers
+                
+                try:
+                    if combo_1.winfo_exists():
+                        combo_1.configure(values=opts1)
+                    if combo_2.winfo_exists():
+                        combo_2.configure(values=opts2)
+                except Exception:
+                    pass
+
+            try:
+                if combo_1 is not None and combo_1.winfo_exists():
+                    combo_1.configure(command=update_options)
+                if combo_2 is not None and combo_2.winfo_exists():
+                    combo_2.configure(command=update_options)
+            except Exception:
+                pass
+                
+            update_options()
 
         configure_pair('d1_combo', 'd1_var', 'd2_combo', 'd2_var')
         configure_pair('dom_d1_combo', 'dom_d1_var', 'dom_d2_combo', 'dom_d2_var')
@@ -477,6 +500,23 @@ class AnalyticsDashboardApp(ctk.CTk):
         }
         return COMPOUND_MAP.get(compound, "white")
 
+    def get_driver_colors_safe(self, d1, d2, session=None):
+        try:
+            c1 = fastf1.plotting.get_driver_color(d1, session=session)
+        except Exception:
+            c1 = '#FFFFFF'
+        try:
+            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+        except Exception:
+            c2 = '#FFFFFF'
+            
+        if c1.lower() == c2.lower():
+            if c1.lower() != '#ffffff':
+                c2 = '#ffffff'
+            else:
+                c2 = '#ff0000'
+        return c1, c2
+
     def create_telemetry_page(self):
         ctk.CTkLabel(self.content_area, text="Interactive Telemetry Battle", font=("Roboto", 24, "bold")).pack(pady=10)
         
@@ -554,8 +594,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             self.tel_d1_pos = self.tel_d1
             self.tel_d2_pos = self.tel_d2
             
-            c1 = fastf1.plotting.get_driver_color(d1, session=session)
-            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            c1, c2 = self.get_driver_colors_safe(d1, d2, session=session)
             
             # Enable play button
             self.btn_play.configure(state="normal", fg_color="#333")
@@ -1009,8 +1048,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             import matplotlib.collections as mcoll
             from matplotlib.colors import ListedColormap, BoundaryNorm
             
-            c1 = fastf1.plotting.get_driver_color(d1, session=session)
-            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            c1, c2 = self.get_driver_colors_safe(d1, d2, session=session)
             
             # Create custom colormap
             cmap = ListedColormap([c1, c2])
@@ -1125,8 +1163,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             import matplotlib.collections as mcoll
             from matplotlib.colors import LinearSegmentedColormap
             
-            c1 = fastf1.plotting.get_driver_color(d1, session=session)
-            c2 = fastf1.plotting.get_driver_color(d2, session=session)
+            c1, c2 = self.get_driver_colors_safe(d1, d2, session=session)
             
             # Custom divergent colormap: D2 (Faster) -> D1 (Faster)
             # D2 is negative deriv, D1 is positive deriv
@@ -1461,8 +1498,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             messagebox.showerror("Error", f"Could not load data for drivers: {e}")
             return
 
-        c1 = fastf1.plotting.get_driver_color(d1, session=session)
-        c2 = fastf1.plotting.get_driver_color(d2, session=session)
+        c1, c2 = self.get_driver_colors_safe(d1, d2, session=session)
         
         for widget in self.race_lines_frame.winfo_children(): widget.destroy()
         
@@ -1690,13 +1726,15 @@ class AnalyticsDashboardApp(ctk.CTk):
         fig, ax = plt.subplots(figsize=(10, 8), facecolor='#121212')
         ax.set_facecolor('#121212')
         
+        c1, c2 = self.get_driver_colors_safe(d1, d2, session=session)
+        
         # Plot D1
         for stint in laps_d1['Stint'].unique():
             stint_laps = laps_d1[laps_d1['Stint'] == stint]
             if stint_laps.empty: continue
             
             compound = stint_laps['Compound'].iloc[0]
-            color = fastf1.plotting.get_driver_color(d1, session=session)
+            color = c1
             comp_color = self.get_compound_color_safe(compound, session=session)
             
             ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
@@ -1708,7 +1746,7 @@ class AnalyticsDashboardApp(ctk.CTk):
             if stint_laps.empty: continue
             
             compound = stint_laps['Compound'].iloc[0]
-            color = fastf1.plotting.get_driver_color(d2, session=session)
+            color = c2
             comp_color = self.get_compound_color_safe(compound, session=session)
             
             ax.scatter(stint_laps['TyreLife'], stint_laps['LapTime'].dt.total_seconds(), 
