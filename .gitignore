@@ -1,6 +1,6 @@
 /f1_cache
 test.py
-/__pycache__
+__pycache__/
 /test
 /cache
 
