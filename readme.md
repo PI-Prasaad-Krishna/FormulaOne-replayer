@@ -40,6 +40,12 @@ This project provides a comprehensive set of tools for F1 data analysis, accessi
 -   **Position Chart**: Lap-by-lap position changes for the entire grid.
 -   **Track Info**: Detailed 2D track map with sector breakdown and active aero (DRS/MOM) visualization.
 
+## Architecture
+
+This project was recently refactored into a **Model-View-Controller (MVC)** architecture to separate heavy data processing from UI rendering:
+- **`core/data_loader.py`**: Handles all FastF1 telemetry fetching, pandas interpolation, and caching logic safely in background threads.
+- **`core/utils.py`**: Shared utilities for formatting, fallback systems, and session management.
+- **UI Layer (`race_replayer.py` / `analytics_dashboard.py`)**: Dedicated CustomTkinter and Matplotlib controllers for rendering the processed data.
 
 ## Installation
 
