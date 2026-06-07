@@ -83,19 +83,19 @@ function App() {
     },
     {
       name: 'macOS',
-      filename: `F1 Visualizer.dmg`,
-      details: `Universal build for Apple Silicon and Intel Macs. Clean installation and optimized performance.`,
-      badge: 'Universal',
-      href: '#',
-      comingSoon: true,
+      filename: `F1 Visualizer (${latestVersion}).dmg`,
+      details: `Standalone Apple Disk Image for macOS. Drag-and-drop installation. Size: ${getDownloadSize('.dmg')}`,
+      badge: 'Installer',
+      href: getDownloadUrl('.dmg'),
+      comingSoon: false,
     },
     {
       name: 'Linux',
-      filename: `F1 Visualizer.AppImage`,
-      details: `Portable AppImage for modern Linux distributions. No installation required.`,
+      filename: `F1 Visualizer (${latestVersion}).AppImage`,
+      details: `Portable AppImage for modern Linux distributions. No installation required. Size: ${getDownloadSize('.AppImage')}`,
       badge: 'Portable',
-      href: '#',
-      comingSoon: true,
+      href: getDownloadUrl('.AppImage'),
+      comingSoon: false,
     },
   ];
 
