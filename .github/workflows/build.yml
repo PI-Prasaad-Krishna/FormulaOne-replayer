@@ -44,7 +44,8 @@ jobs:
       if: runner.os == 'macOS'
       run: |
         # Package the raw .app file into a neat .dmg installer
-        hdiutil create -volname "F1_Visualizer" -srcfolder dist/F1_Visualizer.app -ov -format UDZO dist/F1_Visualizer-macOS.dmg
+        # We specify -size 2g to prevent hdiutil from underestimating the space needed for large Python packages
+        hdiutil create -volname "F1_Visualizer" -srcfolder dist/F1_Visualizer.app -ov -format UDZO -size 2g dist/F1_Visualizer-macOS.dmg
         # Remove the raw .app so we only upload the .dmg
         rm -rf dist/F1_Visualizer.app 
 
