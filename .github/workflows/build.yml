@@ -28,7 +28,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y python3-tk x11-utils libx11-dev libgl1-mesa-glx fuse
+        sudo apt-get install -y python3-tk x11-utils libx11-dev libgl1 libglib2.0-0 libfuse2
 
     - name: Install Python Dependencies
       run: |
