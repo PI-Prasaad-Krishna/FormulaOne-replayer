@@ -79,7 +79,7 @@ jobs:
         touch AppDir/F1_Visualizer.png 
         
         # Download AppImageTool
-        wget -nc https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage
+        wget -nc https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
         chmod +x appimagetool-x86_64.AppImage
         
         # Package it!
