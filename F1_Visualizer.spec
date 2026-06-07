@@ -50,3 +50,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+import sys
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        exe,
+        name='F1_Visualizer.app',
+        icon=None,
+        bundle_identifier=None,
+    )

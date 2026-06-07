@@ -1,0 +1,9 @@
+customtkinter
+fastf1
+vispy
+certifi
+scipy
+pillow
+numpy
+pandas
+matplotlib
